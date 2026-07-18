@@ -76,6 +76,59 @@
     if (error) throw new Error(message || error.message || "Erreur Supabase");
   }
 
+  // Date ISO (YYYY-MM-DD) du jour, en local.
+  function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  // Normalise l'ancien vocabulaire (essai/actif/suspendu/resilie) vers le
+  // nouveau, pour que l'app fonctionne avant comme apres la migration 08.
+  function normStatut(s) {
+    switch (s) {
+      case "essai": return "trialing";
+      case "actif": return "active";
+      case "suspendu": return "past_due";
+      case "resilie": return "canceled";
+      default: return s || "trialing";
+    }
+  }
+
+  // Convertit la ligne entreprise_facturation en objet UI enrichi.
+  // "ouvert" = l'app est-elle utilisable ? Meme regle que le serveur
+  // (app.abonnement_ouvert) : active => oui ; trialing => oui tant que
+  // essai_fin est present ET non expire. Tout le reste => ferme.
+  // "statutEffectif" derive 'trial_expired' d'un essai dont la date est passee.
+  function mapFacturation(fact) {
+    const statut = normStatut(fact.statut || (fact.abonnement_actif ? "actif" : "past_due"));
+    const essaiFin = fact.essai_fin || null;     // timestamp ISO (ou ancienne date)
+    const periodeFin = fact.periode_fin || null; // timestamp ISO
+    const maintenant = Date.now();
+    const essaiValide = !!essaiFin && new Date(essaiFin).getTime() >= maintenant;
+    const periodeValide = !!periodeFin && new Date(periodeFin).getTime() >= maintenant;
+    // Meme regle que le serveur (app.abonnement_ouvert), a la seconde :
+    //   active ; trialing non expire ; canceled encore dans la periode payee.
+    const ouvert = statut === "active" ||
+      (statut === "trialing" && essaiValide) ||
+      (statut === "canceled" && periodeValide);
+    let statutEffectif = statut;
+    if (statut === "trialing" && !essaiValide) statutEffectif = "trial_expired";
+    return {
+      statut: statut,
+      statutEffectif: statutEffectif,
+      formule: fact.formule || null,
+      essaiFin: essaiFin,
+      periodeFin: periodeFin,
+      maxUtilisateurs: fact.max_utilisateurs || null,
+      provider: fact.provider || null,
+      aClientStripe: !!fact.provider_customer_id,
+      ouvert: ouvert,
+      // Compat avec l'ancien affichage.
+      actif: ouvert,
+      jusqu: periodeFin || essaiFin || fact.abonnement_jusqu || null,
+    };
+  }
+
   // ---------- Chargement du profil connecte ----------
   async function chargerProfil() {
     const c = client();
@@ -94,7 +147,7 @@
     const { data: mods } = await c.from("entreprise_modules").select("module, actif").eq("actif", true);
     modulesCache = (mods || []).map((m) => m.module);
     const { data: fact } = await c.from("entreprise_facturation").select("*").maybeSingle();
-    factCache = fact ? { actif: fact.abonnement_actif, jusqu: fact.abonnement_jusqu } : null;
+    factCache = fact ? mapFacturation(fact) : null;
     return me;
   }
 
@@ -148,6 +201,41 @@
     // --- Droits (modules payants + abonnement de base) ---
     modulesActifs() { return (modulesCache || []).slice(); },
     facturation() { return factCache; },
+
+    // --- Abonnement Stripe (Edge Functions) ---
+    // Recharge l'etat de facturation depuis la base (apres retour de paiement).
+    async rechargerFacturation() {
+      const c = client();
+      const { data: fact } = await c.from("entreprise_facturation").select("*").maybeSingle();
+      factCache = fact ? mapFacturation(fact) : null;
+      return factCache;
+    },
+    // Apres un retour de paiement (regle 8 : on n'accorde JAMAIS l'acces sur
+    // le seul retour de page, on relit la base). Le webhook signe peut avoir un
+    // leger decalage : on relit quelques fois jusqu'a voir l'abonnement ouvert.
+    async attendreActivation(essais, delaiMs) {
+      essais = essais || 6; delaiMs = delaiMs || 1500;
+      for (let i = 0; i < essais; i++) {
+        const f = await this.rechargerFacturation();
+        if (f && f.ouvert) return f;
+        if (i < essais - 1) await new Promise((r) => setTimeout(r, delaiMs));
+      }
+      return factCache;
+    },
+    // Demande une session Checkout pour la formule choisie. Renvoie l'URL Stripe.
+    async creerCheckout(formule) {
+      const { data, error } = await client().functions.invoke("creer-checkout", { body: { formule: formule } });
+      if (error) throw new Error(error.message || "Impossible de creer le paiement");
+      if (!data || !data.url) throw new Error((data && data.error) || "Reponse de paiement invalide");
+      return data.url;
+    },
+    // Ouvre le portail Stripe (gerer / annuler l'abonnement). Renvoie l'URL.
+    async ouvrirPortail() {
+      const { data, error } = await client().functions.invoke("portail-client", { body: {} });
+      if (error) throw new Error(error.message || "Portail indisponible");
+      if (!data || !data.url) throw new Error((data && data.error) || "Reponse du portail invalide");
+      return data.url;
+    },
 
     // --- Session ---
     getSession() { return me; },              // synchrone, lit le cache charge par init()

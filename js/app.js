@@ -16,6 +16,27 @@
   const { todayISO } = window.Chantier.util;
   const app = document.getElementById("app");
 
+  // Mode LECTURE SEULE : abonnement ferme (essai expire, past_due, impaye,
+  // resilie hors periode payee). La consultation des donnees reste possible,
+  // mais toute ECRITURE est neutralisee ici, EN PLUS du blocage serveur (RLS),
+  // avec un message clair invitant a s'abonner. Le serveur reste la verite.
+  function enLectureSeule() { return !!state.lectureSeule; }
+  (function protegerEcritures() {
+    const METHODES = ["createIntervention", "updateIntervention", "deleteIntervention",
+      "setStatut", "demarrerPointage", "terminerPointage", "ajouterNote", "supprimerNote"];
+    METHODES.forEach((m) => {
+      if (!api || typeof api[m] !== "function") return;
+      const orig = api[m].bind(api);
+      api[m] = function () {
+        if (enLectureSeule()) {
+          montrerToast("Periode d'essai terminee. Abonnez-vous pour creer ou modifier.", "attente");
+          return Promise.reject(new Error("lecture-seule"));
+        }
+        return orig.apply(api, arguments);
+      };
+    });
+  })();
+
   // ---------- Modules payants (fonctions optionnelles, achat unique) ----------
   // Catalogue presente au patron. Une future fonction payante s'ajoute ici,
   // puis se protege dans le code avec features.actif("<cle>").
@@ -47,6 +68,7 @@
     onglet: "planning", // patron: planning | equipe ; employe: tournee
     date: todayISO(),
     vue: "jour", // jour | mois | annee (niveau de zoom de l'agenda)
+    lectureSeule: false, // vrai si abonnement ferme : consultation only
   };
 
   // ---------- Helpers ----------
@@ -336,7 +358,38 @@
         <nav class="tabbar"></nav>
       </div>
     `);
-    root.querySelector(".content").appendChild(contenu);
+    const contentEl = root.querySelector(".content");
+    // Bandeau d'essai (cloud) : compteur de jours + alertes J-7 / J-3 / J-1.
+    if (api.estCloud && window.Chantier.abonnement && api.facturation) {
+      try {
+        const bh = window.Chantier.abonnement.banniere(api.facturation());
+        if (bh) { const b = el(bh); if (b) contentEl.appendChild(b); }
+      } catch (e) {}
+    }
+    // Bandeau LECTURE SEULE (abonnement ferme) : message clair + bouton abonnement.
+    if (api.estCloud && enLectureSeule()) {
+      const fact = api.facturation ? api.facturation() : null;
+      const eff = fact && (fact.statutEffectif || fact.statut);
+      const msg = eff === "trial_expired" ? "Votre periode d'essai est terminee."
+        : eff === "canceled" ? "Votre abonnement est resilie."
+        : eff === "unpaid" ? "Votre abonnement est impaye."
+        : "Un paiement n'a pas abouti.";
+      const bar = el('<div role="alert" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;background:#7c2d12;color:#fff;padding:10px 14px;border-radius:12px;margin:8px 0;font-size:13.5px;line-height:1.4;"></div>');
+      const txt = el("<span></span>");
+      txt.textContent = msg + " Vos donnees restent consultables en lecture seule.";
+      bar.appendChild(txt);
+      if (patron) {
+        const cta = el('<button style="background:#fff;color:#7c2d12;border:0;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13.5px;">Choisir un abonnement</button>');
+        cta.addEventListener("click", ouvrirAbonnementModal);
+        bar.appendChild(cta);
+      } else {
+        const info = el("<span></span>");
+        info.textContent = "Prevenez le patron pour reactiver l'acces.";
+        bar.appendChild(info);
+      }
+      contentEl.appendChild(bar);
+    }
+    contentEl.appendChild(contenu);
     const tabbar = root.querySelector(".tabbar");
     nav.forEach(([id, label, icon]) => {
       const t = el(`<button class="tab ${state.onglet === id ? "on" : ""}" data-tab="${id}">${icon}<span>${label}</span></button>`);
@@ -431,11 +484,20 @@
         const aide = demo
           ? '<p class="reg-hint">Mode demonstration : touchez un module pour l\'activer / desactiver et tester.</p>'
           : '<p class="reg-hint">Les modules sont des fonctions en plus, a l\'unite. Pour en activer un, contactez-nous : l\'activation se fait de notre cote (elle ne peut pas se faire depuis l\'appli).</p>';
+        // En cloud, on affiche le vrai bloc d'abonnement Stripe (statut +
+        // formules + gerer/annuler). En demo, l'ancien affichage informatif.
+        const aboHtml = (!demo && window.Chantier.abonnement)
+          ? window.Chantier.abonnement.htmlReglages(fact)
+          : `<div class="reg-titre">${ICON.spark} Abonnement & modules</div>
+             <p class="reg-txt">Abonnement de base : ${abo}</p>`;
         blocMod.innerHTML = `
-          <div class="reg-titre">${ICON.spark} Abonnement & modules</div>
-          <p class="reg-txt">Abonnement de base : ${abo}</p>
+          ${aboHtml}
+          <div class="reg-titre" style="margin-top:14px">Modules</div>
           <div class="mod-list">${lignes || '<p class="reg-hint">Aucun module disponible pour l\'instant.</p>'}</div>
           ${aide}`;
+        if (!demo && window.Chantier.abonnement) {
+          window.Chantier.abonnement.brancherReglages(blocMod);
+        }
         if (demo) {
           blocMod.querySelectorAll(".mod-row.demo").forEach((row) => {
             row.addEventListener("click", () => {
@@ -508,12 +570,14 @@
   }
 
   function fabAjout() {
+    if (enLectureSeule()) return document.createComment("lecture-seule"); // pas de creation
     const fab = el(`<button class="fab" title="Nouvelle intervention">${ICON.plus}</button>`);
     fab.addEventListener("click", () => formIntervention(null));
     return fab;
   }
 
   function fabAssistant() {
+    if (enLectureSeule()) return document.createComment("lecture-seule"); // l'assistant ecrit
     const fab = el(`<button class="fab fab-ia" title="Assistant IA">${ICON.spark}</button>`);
     fab.addEventListener("click", assistantScreen);
     return fab;
@@ -1255,6 +1319,16 @@
   // ---------- Routeur ----------
   async function render() {
     if (!state.me) { renderLogin(); return; }
+    // Acces (cloud) : si l'abonnement est ferme (essai expire, past_due,
+    // impaye, resilie hors periode payee), on passe en LECTURE SEULE. La
+    // consultation reste possible ; les ecritures sont bloquees (serveur + UI)
+    // et un bandeau clair invite a s'abonner. Choix produit : lecture seule
+    // plutot qu'un mur, pour que le client retrouve ses donnees.
+    state.lectureSeule = false;
+    if (api.estCloud && window.Chantier.abonnement) {
+      const fact = api.facturation ? api.facturation() : null;
+      state.lectureSeule = !!(fact && !window.Chantier.abonnement.ouvert(fact));
+    }
     demarrerSync();
     features.charger(api.modulesActifs ? api.modulesActifs() : []);
     employesCache = await api.listEmployes();
@@ -1290,6 +1364,29 @@
     } catch (e) {
       console.warn("init backend:", e);
     }
+    // Retour de Stripe Checkout. REGLE 8 : on n'accorde JAMAIS l'acces sur le
+    // seul retour de page ; on relit la base (le webhook signe fait foi). Le
+    // webhook peut avoir un leger decalage => on attend qu'il ait ecrit.
+    let pendingAboMsg = null;
+    try {
+      const params = new URLSearchParams(location.search);
+      if (params.has("abo")) {
+        const retour = params.get("abo");
+        history.replaceState(null, "", location.pathname);
+        if (retour === "ok") {
+          let f = null;
+          try {
+            f = api.attendreActivation ? await api.attendreActivation()
+              : (api.rechargerFacturation ? await api.rechargerFacturation() : null);
+          } catch (e) {}
+          pendingAboMsg = (f && f.ouvert)
+            ? { type: "ok", texte: "Paiement confirme, votre abonnement est actif. Merci !" }
+            : { type: "attente", texte: "Paiement bien recu. L'activation est en cours de validation, cela peut prendre quelques secondes. Actualisez si l'acces n'est pas encore ouvert." };
+        } else if (retour === "annule") {
+          pendingAboMsg = { type: "info", texte: "Paiement annule. Vous pouvez choisir une formule quand vous voulez." };
+        }
+      }
+    } catch (e) {}
     const sess = api.getSession();
     if (sess) {
       state.me = sess;
@@ -1297,6 +1394,46 @@
       employesCache = await api.listEmployes();
     }
     render();
+    if (pendingAboMsg) montrerToast(pendingAboMsg.texte, pendingAboMsg.type);
   }
+
+  // Modale d'abonnement (choix de formule / gestion), ouverte depuis le bandeau
+  // lecture seule. Reutilise le bloc reglages d'abonnement deja teste.
+  function ouvrirAbonnementModal() {
+    if (!window.Chantier.abonnement) return;
+    const fact = api.facturation ? api.facturation() : null;
+    const sheet = el(`
+      <div class="modal">
+        <div class="sheet">
+          <div class="sheet-head"><h2>Abonnement</h2><button class="x" id="close">&times;</button></div>
+          <div class="sheet-body"><div class="reg-bloc" id="abo-bloc"></div></div>
+        </div>
+      </div>
+    `);
+    const bloc = sheet.querySelector("#abo-bloc");
+    bloc.innerHTML = window.Chantier.abonnement.htmlReglages(fact);
+    window.Chantier.abonnement.brancherReglages(bloc);
+    const close = () => sheet.remove();
+    sheet.querySelector("#close").addEventListener("click", close);
+    sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
+    app.appendChild(sheet);
+  }
+
+  // Petit bandeau de confirmation (retour de paiement). Styles inline (CSP OK).
+  function montrerToast(texte, type) {
+    const couleur = type === "ok" ? "#16a34a" : (type === "attente" ? "#b45309" : "#334155");
+    const t = el('<div class="abo-toast" role="status"></div>');
+    t.textContent = texte;
+    t.setAttribute("style",
+      "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(78px + env(safe-area-inset-bottom));" +
+      "z-index:99999;max-width:440px;width:calc(100% - 24px);background:" + couleur + ";color:#fff;" +
+      "padding:12px 40px 12px 16px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35);font-size:14px;line-height:1.4;");
+    const close = el('<button aria-label="Fermer" style="position:absolute;top:6px;right:8px;background:transparent;border:0;color:#fff;font-size:20px;cursor:pointer;line-height:1;">&times;</button>');
+    close.addEventListener("click", () => { try { t.remove(); } catch (e) {} });
+    t.appendChild(close);
+    document.body.appendChild(t);
+    setTimeout(() => { try { t.remove(); } catch (e) {} }, 10000);
+  }
+
   boot();
 })();
