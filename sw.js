@@ -1,10 +1,13 @@
 /* Service worker Chantier : reseau d'abord sur le code (MAJ auto), cache en secours. */
-const CACHE = "chantier-v25";
+const CACHE = "chantier-v26";
 const ASSETS = [
   "./",
   "./index.html",
   "./css/style.css",
+  "./css/premium.css",
+  "./assets/clicchantier-3d-hero.webp",
   "./vendor/supabase.js",
+  "./js/icons-premium.js",
   "./js/api.js",
   "./js/backend-supabase.js",
   "./js/ia.js",
@@ -13,6 +16,7 @@ const ASSETS = [
   "./js/peintre.js",
   "./js/abonnement.js",
   "./js/app.js",
+  "./install-pwa.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

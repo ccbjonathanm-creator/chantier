@@ -11,6 +11,9 @@
  * Integration (1 ligne avant </body>) :
  *   <script src="install-pwa.js" data-app-name="Resolv" data-accent="#00e5ff"></script>
  *
+ * Option data-vouvoie="1" : passe tous les textes au vouvoiement (public age, contexte pro).
+ * Sans cet attribut, rien ne change : le tutoiement reste le comportement par defaut.
+ *
  * Apercu sur PC (sans telephone), force un etat :
  *   ?pwa_install_debug=ios-safari | ios-inapp | ios-otherbrowser | android-installable | android-inapp
  *
@@ -74,8 +77,16 @@
     appName: opt('appName', document.title || 'cette application'),
     accent: opt('accent', '#4f7cff'),
     // Nombre de jours avant de reproposer si l'utilisateur ferme le bandeau.
-    remindDays: parseInt(opt('remindDays', '7'), 10)
+    remindDays: parseInt(opt('remindDays', '7'), 10),
+    // data-vouvoie="1" : passe les textes au vouvoiement, pour les apps qui vouvoient
+    // (public age, contexte professionnel). Par defaut on tutoie, comme avant.
+    vouvoie: opt('vouvoie', '') === '1'
   };
+
+  // Chaque texte a deux formulations : tutoiement (historique) et vouvoiement.
+  function dire(tu, vous) {
+    return CFG.vouvoie ? vous : tu;
+  }
 
   var DISMISS_KEY = 'pwa_install_dismissed_until_v1';
   var deferredPrompt = null;
@@ -182,7 +193,10 @@
   // --------- Ecrans par plateforme ---------
   function showInstallButton() {
     mount({
-      head: head('Installer ' + CFG.appName, "Ajoute l'application a ton ecran, elle s'ouvre en plein ecran, meme hors-ligne."),
+      head: head('Installer ' + CFG.appName, dire(
+        "Ajoute l'application a ton ecran, elle s'ouvre en plein ecran, meme hors-ligne.",
+        "Ajoutez l'application a votre ecran, elle s'ouvre en plein ecran, meme hors-ligne."
+      )),
       body: '<button class="' + PREFIX + '-btn" type="button">Installer l\'application</button>',
       onMount: function (wrap) {
         wrap.querySelector('.' + PREFIX + '-btn').addEventListener('click', function () {
@@ -201,18 +215,21 @@
     mount({
       head: head('Ajouter ' + CFG.appName + ' a l\'ecran d\'accueil', 'Deux etapes dans Safari :'),
       body: '<ol class="' + PREFIX + '-steps">' +
-        '<li><span class="' + PREFIX + '-num">1</span> Appuie sur <span class="' + PREFIX + '-chip">' + ICON.share + 'Partager</span> en bas de l\'ecran</li>' +
-        '<li><span class="' + PREFIX + '-num">2</span> Choisis <span class="' + PREFIX + '-chip">' + ICON.plus + 'Sur l\'ecran d\'accueil</span></li>' +
+        '<li><span class="' + PREFIX + '-num">1</span> ' + dire('Appuie', 'Appuyez') + ' sur <span class="' + PREFIX + '-chip">' + ICON.share + 'Partager</span> en bas de l\'ecran</li>' +
+        '<li><span class="' + PREFIX + '-num">2</span> ' + dire('Choisis', 'Choisissez') + ' <span class="' + PREFIX + '-chip">' + ICON.plus + 'Sur l\'ecran d\'accueil</span></li>' +
         '</ol>'
     }, ICON.share);
   }
 
   function showIosOpenInSafari(title) {
     mount({
-      head: head(title, "L'installation sur iPhone ne marche que dans Safari. Ouvre cette page dans Safari :"),
+      head: head(title, dire(
+        "L'installation sur iPhone ne marche que dans Safari. Ouvre cette page dans Safari :",
+        "L'installation sur iPhone ne marche que dans Safari. Ouvrez cette page dans Safari :"
+      )),
       body: '<ol class="' + PREFIX + '-steps">' +
-        '<li><span class="' + PREFIX + '-num">1</span> Touche <span class="' + PREFIX + '-chip">' + ICON.menu + '</span> ou l\'icone de partage</li>' +
-        '<li><span class="' + PREFIX + '-num">2</span> Choisis <span class="' + PREFIX + '-chip">' + ICON.safari + 'Ouvrir dans Safari</span></li>' +
+        '<li><span class="' + PREFIX + '-num">1</span> ' + dire('Touche', 'Touchez') + ' <span class="' + PREFIX + '-chip">' + ICON.menu + '</span> ou l\'icone de partage</li>' +
+        '<li><span class="' + PREFIX + '-num">2</span> ' + dire('Choisis', 'Choisissez') + ' <span class="' + PREFIX + '-chip">' + ICON.safari + 'Ouvrir dans Safari</span></li>' +
         '<li><span class="' + PREFIX + '-num">3</span> Puis Partager &rarr; Sur l\'ecran d\'accueil</li>' +
         '</ol>'
     }, ICON.safari);
@@ -220,7 +237,10 @@
 
   function showAndroidInApp() {
     mount({
-      head: head('Ouvre ' + CFG.appName + ' dans Chrome', "Pour installer l'application, ouvre cette page dans Chrome (menu ⋮ en haut a droite → Ouvrir dans le navigateur), puis Installer.")
+      head: head(dire('Ouvre ', 'Ouvrez ') + CFG.appName + ' dans Chrome', dire(
+        "Pour installer l'application, ouvre cette page dans Chrome (menu ⋮ en haut a droite → Ouvrir dans le navigateur), puis Installer.",
+        "Pour installer l'application, ouvrez cette page dans Chrome (menu ⋮ en haut a droite → Ouvrir dans le navigateur), puis Installer."
+      ))
     }, ICON.menu);
   }
 
@@ -230,8 +250,8 @@
     if (forced) {
       switch (forced) {
         case 'ios-safari': return showIosSafari();
-        case 'ios-inapp': return showIosOpenInSafari('Ouvre ' + CFG.appName + ' dans Safari');
-        case 'ios-otherbrowser': return showIosOpenInSafari('Passe sur Safari pour installer');
+        case 'ios-inapp': return showIosOpenInSafari(dire('Ouvre ', 'Ouvrez ') + CFG.appName + ' dans Safari');
+        case 'ios-otherbrowser': return showIosOpenInSafari(dire('Passe', 'Passez') + ' sur Safari pour installer');
         case 'android-installable': return showInstallButton();
         case 'android-inapp': return showAndroidInApp();
         default: return;
@@ -249,8 +269,8 @@
 
     switch (state) {
       case 'ios-safari': return showIosSafari();
-      case 'ios-inapp': return showIosOpenInSafari('Ouvre ' + CFG.appName + ' dans Safari');
-      case 'ios-otherbrowser': return showIosOpenInSafari('Passe sur Safari pour installer');
+      case 'ios-inapp': return showIosOpenInSafari(dire('Ouvre ', 'Ouvrez ') + CFG.appName + ' dans Safari');
+      case 'ios-otherbrowser': return showIosOpenInSafari(dire('Passe', 'Passez') + ' sur Safari pour installer');
       case 'android-inapp': return showAndroidInApp();
       // android-installable / desktop-installable : geres par l'evenement beforeinstallprompt.
       // android-generic / desktop : rien (pas d'install fiable a proposer).

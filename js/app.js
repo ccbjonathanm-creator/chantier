@@ -110,7 +110,7 @@
     const jourEnCours = state.date >= it.date && state.date <= it.dateFin
       ? joursEntre(it.date, state.date) : 0;
     const num = jourEnCours ? `Jour ${jourEnCours}/${total}` : `${total} jours`;
-    return `<span class="chip-long">🔧 Chantier ${esc(num)}</span>`;
+    return `<span class="chip-long">${ICON.metier}Chantier ${esc(num)}</span>`;
   }
 
   // --- Dates : mois et annee ---
@@ -156,19 +156,22 @@
     return e ? e.couleur : "#64748b";
   }
 
+  const icon3D = window.ClicChantierIcons3D;
   const ICON = {
-    planning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
-    equipe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-    tournee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
-    phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
-    map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20l-6-3V4l6 3 6-3 6 3v13l-6-3-6 3zM9 7v13M15 4v13"/></svg>',
-    note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>',
-    mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg>',
-    spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>',
-    gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
-    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
-    metier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3l-6 6a1.5 1.5 0 0 0 2.1 2.1l6-6a4 4 0 0 0 5.3-5.4l-2.4 2.4-2.1-.6-.6-2.1z"/></svg>',
+    planning: icon3D("planning"),
+    equipe: icon3D("equipe"),
+    tournee: icon3D("tournee"),
+    plus: icon3D("plus"),
+    back: icon3D("back"),
+    forward: icon3D("forward"),
+    phone: icon3D("phone"),
+    map: icon3D("map"),
+    note: icon3D("note"),
+    mic: icon3D("mic"),
+    spark: icon3D("spark"),
+    gear: icon3D("gear"),
+    trash: icon3D("trash"),
+    metier: icon3D("metier"),
   };
   // Primitives partagees avec les modules metier (ex : js/plombier.js)
   window.Chantier.shared = { ICON, esc };
@@ -319,7 +322,7 @@
             <span class="profil-nom">${esc(e.nom)}</span>
             <span class="profil-role">${e.role === "patron" ? "Patron / gerant" : "Plombier"}</span>
           </span>
-          <span class="chev">&rsaquo;</span>
+          <span class="chev">${ICON.forward}</span>
         </button>
       `);
       b.addEventListener("click", () => {
@@ -364,7 +367,7 @@
             </div>
           </div>
           <div class="top-actions">
-            <button class="icon-btn" id="reglages" title="Reglages">${ICON.gear}</button>
+            <button class="icon-btn" id="reglages" title="Reglages" aria-label="Ouvrir les reglages">${ICON.gear}</button>
             <button class="logout" id="logout">Changer</button>
           </div>
         </header>
@@ -388,12 +391,12 @@
         : eff === "canceled" ? "Votre abonnement est resilie."
         : eff === "unpaid" ? "Votre abonnement est impaye."
         : "Un paiement n'a pas abouti.";
-      const bar = el('<div role="alert" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;background:#7c2d12;color:#fff;padding:10px 14px;border-radius:12px;margin:8px 0;font-size:13.5px;line-height:1.4;"></div>');
+      const bar = el('<div class="subscription-alert" role="alert"></div>');
       const txt = el("<span></span>");
       txt.textContent = msg + " Vos donnees restent consultables en lecture seule.";
       bar.appendChild(txt);
       if (patron) {
-        const cta = el('<button style="background:#fff;color:#7c2d12;border:0;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13.5px;">Choisir un abonnement</button>');
+        const cta = el('<button class="subscription-alert-cta">Choisir un abonnement</button>');
         cta.addEventListener("click", ouvrirAbonnementModal);
         bar.appendChild(cta);
       } else {
@@ -426,7 +429,7 @@
     const sheet = el(`
       <div class="modal">
         <div class="sheet">
-          <div class="sheet-head"><h2>Reglages</h2><button class="x" id="close">&times;</button></div>
+          <div class="sheet-head"><h2>Reglages</h2><button class="x" id="close" aria-label="Fermer">&times;</button></div>
           <div class="sheet-body">
             <div class="reg-bloc">
               <div class="reg-titre">${ICON.spark} Assistant vocal IA</div>
@@ -562,9 +565,9 @@
     cont.appendChild(zoomBar());
     const bar = el(`
       <div class="datebar">
-        <button class="round" id="prev">&lsaquo;</button>
+        <button class="round" id="prev" aria-label="Jour precedent">${ICON.back}</button>
         <div class="dateinfo"><b>${fmtDateFR(state.date)}</b><span>${state.date === todayISO() ? "Aujourd'hui" : ""}</span></div>
-        <button class="round" id="next">&rsaquo;</button>
+        <button class="round" id="next" aria-label="Jour suivant">${ICON.forward}</button>
       </div>
     `);
     bar.querySelector("#prev").addEventListener("click", () => { state.date = decalDate(state.date, -1); render(); });
@@ -583,16 +586,119 @@
     shell(cont);
   }
 
+  // ---------- Boutons flottants deplacables ----------
+  const FAB_POS_KEY = "clicchantier_fab_positions_v1";
+
+  function lirePositionsFab() {
+    try { return JSON.parse(localStorage.getItem(FAB_POS_KEY) || "{}"); }
+    catch (e) { return {}; }
+  }
+
+  function sauverPositionFab(cle, gauche, haut, largeur, hauteur) {
+    try {
+      const positions = lirePositionsFab();
+      positions[cle] = {
+        x: (gauche + largeur / 2) / window.innerWidth,
+        y: (haut + hauteur / 2) / window.innerHeight,
+      };
+      localStorage.setItem(FAB_POS_KEY, JSON.stringify(positions));
+    } catch (e) {}
+  }
+
+  function rendreFabDeplacable(fab, cle) {
+    fab.classList.add("fab-draggable");
+    fab.dataset.fab = cle;
+
+    let actif = false;
+    let deplace = false;
+    let bloqueClic = false;
+    let departX = 0;
+    let departY = 0;
+    let departGauche = 0;
+    let departHaut = 0;
+
+    requestAnimationFrame(() => {
+      const pos = lirePositionsFab()[cle];
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+      const rect = fab.getBoundingClientRect();
+      const marge = 8;
+      const gauche = Math.max(marge, Math.min(window.innerWidth - rect.width - marge, pos.x * window.innerWidth - rect.width / 2));
+      const haut = Math.max(marge, Math.min(window.innerHeight - rect.height - marge, pos.y * window.innerHeight - rect.height / 2));
+      fab.style.left = gauche + "px";
+      fab.style.top = haut + "px";
+      fab.style.right = "auto";
+      fab.style.bottom = "auto";
+    });
+
+    fab.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      actif = true;
+      deplace = false;
+      // offsetLeft/offsetTop et non getBoundingClientRect : les etats survol et
+      // "dragging" appliquent un scale(1.08) qui fausserait le rectangle de depart
+      // et ferait remonter le bouton de 2 px a chaque prise.
+      fab.classList.add("dragging");
+      departX = e.clientX;
+      departY = e.clientY;
+      departGauche = fab.offsetLeft;
+      departHaut = fab.offsetTop;
+      try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    fab.addEventListener("pointermove", (e) => {
+      if (!actif) return;
+      const dx = e.clientX - departX;
+      const dy = e.clientY - departY;
+      if (!deplace && Math.hypot(dx, dy) < 5) return;
+      deplace = true;
+      e.preventDefault();
+
+      const marge = 8;
+      const largeur = fab.offsetWidth;
+      const hauteur = fab.offsetHeight;
+      const gauche = Math.max(marge, Math.min(window.innerWidth - largeur - marge, departGauche + dx));
+      const haut = Math.max(marge, Math.min(window.innerHeight - hauteur - marge, departHaut + dy));
+      fab.style.left = gauche + "px";
+      fab.style.top = haut + "px";
+      fab.style.right = "auto";
+      fab.style.bottom = "auto";
+      sauverPositionFab(cle, gauche, haut, largeur, hauteur);
+    });
+
+    function terminerDeplacement(e) {
+      if (!actif) return;
+      actif = false;
+      fab.classList.remove("dragging");
+      try { fab.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (!deplace) return;
+      bloqueClic = true;
+      sauverPositionFab(cle, fab.offsetLeft, fab.offsetTop, fab.offsetWidth, fab.offsetHeight);
+    }
+
+    fab.addEventListener("pointerup", terminerDeplacement);
+    fab.addEventListener("pointercancel", terminerDeplacement);
+    fab.addEventListener("click", (e) => {
+      if (!bloqueClic) return;
+      bloqueClic = false;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+
+    return fab;
+  }
+
   function fabAjout() {
     if (enLectureSeule()) return document.createComment("lecture-seule"); // pas de creation
-    const fab = el(`<button class="fab" title="Nouvelle intervention">${ICON.plus}</button>`);
+    const fab = el(`<button class="fab" title="Nouvelle intervention" aria-label="Nouvelle intervention">${ICON.plus}</button>`);
+    rendreFabDeplacable(fab, "nouvelle-intervention");
     fab.addEventListener("click", () => formIntervention(null));
     return fab;
   }
 
   function fabAssistant() {
     if (enLectureSeule()) return document.createComment("lecture-seule"); // l'assistant ecrit
-    const fab = el(`<button class="fab fab-ia" title="Assistant IA">${ICON.spark}</button>`);
+    const fab = el(`<button class="fab fab-ia" title="Assistant IA" aria-label="Ouvrir l'assistant IA">${ICON.spark}</button>`);
+    rendreFabDeplacable(fab, "assistant-ia");
     fab.addEventListener("click", assistantScreen);
     return fab;
   }
@@ -608,9 +714,9 @@
     const root = el(`
       <div class="asst-screen">
         <header class="topbar">
-          <button class="logout" id="back">&lsaquo; Retour</button>
+          <button class="logout" id="back">${ICON.back} Retour</button>
           <div class="asst-titre"><span class="me-nom">${ICON.spark} Assistant</span><span class="me-role">Regardez le planning, puis dictez</span></div>
-          <button class="icon-btn" id="reglages2" title="Reglages">${ICON.gear}</button>
+          <button class="icon-btn" id="reglages2" title="Reglages" aria-label="Ouvrir les reglages">${ICON.gear}</button>
         </header>
         <main class="asst-content">
           <div id="asst-cal"></div>
@@ -666,9 +772,9 @@
       calBox.innerHTML = "";
       const nav = el(`
         <div class="datebar">
-          <button class="round" id="pm">&lsaquo;</button>
+          <button class="round" id="pm" aria-label="Mois precedent">${ICON.back}</button>
           <div class="dateinfo"><b>${moisLabel(calDate)}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} ce mois</span></div>
-          <button class="round" id="nm">&rsaquo;</button>
+          <button class="round" id="nm" aria-label="Mois suivant">${ICON.forward}</button>
         </div>
       `);
       nav.querySelector("#pm").addEventListener("click", () => { calDate = decalMois(calDate, -1); jourSel = null; jourBox.innerHTML = ""; renderCal(); });
@@ -785,9 +891,9 @@
     cont.appendChild(zoomBar());
     const nav = el(`
       <div class="datebar">
-        <button class="round" id="prev">&lsaquo;</button>
+        <button class="round" id="prev" aria-label="Periode precedente">${ICON.back}</button>
         <div class="dateinfo"><b>${moisLabel(state.date)}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} ce mois</span></div>
-        <button class="round" id="next">&rsaquo;</button>
+        <button class="round" id="next" aria-label="Periode suivante">${ICON.forward}</button>
       </div>
     `);
     nav.querySelector("#prev").addEventListener("click", () => { state.date = decalMois(state.date, -1); render(); });
@@ -832,9 +938,9 @@
     cont.appendChild(zoomBar());
     const nav = el(`
       <div class="datebar">
-        <button class="round" id="prev">&lsaquo;</button>
+        <button class="round" id="prev" aria-label="Annee precedente">${ICON.back}</button>
         <div class="dateinfo"><b>${an}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} dans l'annee</span></div>
-        <button class="round" id="next">&rsaquo;</button>
+        <button class="round" id="next" aria-label="Annee suivante">${ICON.forward}</button>
       </div>
     `);
     nav.querySelector("#prev").addEventListener("click", () => { state.date = decalAnnee(state.date, -1); render(); });
@@ -901,7 +1007,7 @@
     const sheet = el(`
       <div class="modal">
         <div class="sheet">
-          <div class="sheet-head"><h2>Suivi du chantier</h2><button class="x" id="close">&times;</button></div>
+          <div class="sheet-head"><h2>Suivi du chantier</h2><button class="x" id="close" aria-label="Fermer">&times;</button></div>
           <div class="sheet-body">
             <div class="det-sub">${esc(it.client)} &middot; ${esc(it.adresse)}</div>
             <div class="composer">
@@ -1039,7 +1145,7 @@
         <div class="sheet">
           <div class="sheet-head">
             <h2>${esc(it.client)}</h2>
-            <button class="x" id="close">&times;</button>
+            <button class="x" id="close" aria-label="Fermer">&times;</button>
           </div>
           <div class="sheet-body">
             <div class="det-meta">
@@ -1104,7 +1210,7 @@
         <div class="sheet">
           <div class="sheet-head">
             <h2>${edition ? "Modifier l'intervention" : "Nouvelle intervention"}</h2>
-            <button class="x" id="close">&times;</button>
+            <button class="x" id="close" aria-label="Fermer">&times;</button>
           </div>
           <div class="sheet-body">
             <label>Client<input id="f-client" type="text" value="${esc(data.client)}" placeholder="Nom du client"></label>
@@ -1169,9 +1275,9 @@
     const cont = el(`<div class="page"></div>`);
     cont.appendChild(el(`
       <div class="datebar">
-        <button class="round" id="prev">&lsaquo;</button>
+        <button class="round" id="prev" aria-label="Jour precedent">${ICON.back}</button>
         <div class="dateinfo"><b>${fmtDateFR(state.date)}</b><span>Heures de l'equipe</span></div>
-        <button class="round" id="next">&rsaquo;</button>
+        <button class="round" id="next" aria-label="Jour suivant">${ICON.forward}</button>
       </div>
     `));
     cont.querySelector("#prev").addEventListener("click", () => { state.date = decalDate(state.date, -1); render(); });
@@ -1224,9 +1330,9 @@
     cont.appendChild(zoomBar());
     const nav = el(`
       <div class="datebar">
-        <button class="round" id="prev">&lsaquo;</button>
+        <button class="round" id="prev" aria-label="Jour precedent">${ICON.back}</button>
         <div class="dateinfo"><b>${fmtDateFR(state.date)}</b><span>${state.date === todayISO() ? "Ma tournee du jour" : "Ma tournee"}</span></div>
-        <button class="round" id="next">&rsaquo;</button>
+        <button class="round" id="next" aria-label="Jour suivant">${ICON.forward}</button>
       </div>
     `);
     nav.querySelector("#prev").addEventListener("click", () => { state.date = decalDate(state.date, -1); render(); });
@@ -1419,7 +1525,7 @@
     const sheet = el(`
       <div class="modal">
         <div class="sheet">
-          <div class="sheet-head"><h2>Abonnement</h2><button class="x" id="close">&times;</button></div>
+          <div class="sheet-head"><h2>Abonnement</h2><button class="x" id="close" aria-label="Fermer">&times;</button></div>
           <div class="sheet-body"><div class="reg-bloc" id="abo-bloc"></div></div>
         </div>
       </div>
