@@ -235,7 +235,15 @@
       const c = client();
       const { error } = await c.auth.signInWithPassword({ email: (email || "").trim(), password });
       boom(error, "Email ou mot de passe incorrect.");
-      const prof = await chargerProfil();
+      let prof = await chargerProfil();
+      // Cas d'une inscription confirmee puis reprise a la main : l'utilisateur
+      // se connecte lui-meme au lieu de revenir avec une session ouverte, donc
+      // init() est deja passe. On finalise ici aussi, sinon il resterait bloque
+      // sur "ce compte n'est rattache a aucune entreprise".
+      if (!prof) {
+        try { prof = await finaliserInscriptionEnAttente(); }
+        catch (e) { console.warn("finalisation inscription:", e); }
+      }
       if (!prof) throw new Error("no-profile"); // connecte mais pas encore rattache a une entreprise
       return prof;
     },

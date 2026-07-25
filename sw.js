@@ -1,5 +1,5 @@
 /* Service worker Chantier : reseau d'abord sur le code (MAJ auto), cache en secours. */
-const CACHE = "chantier-v24";
+const CACHE = "chantier-v25";
 const ASSETS = [
   "./",
   "./index.html",
