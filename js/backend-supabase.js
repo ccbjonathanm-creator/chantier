@@ -175,6 +175,20 @@
     return !!(data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0);
   }
 
+  // Adresse de retour du lien de confirmation.
+  // ATTENTION : sans ce reglage, supabase-js envoie window.location.ORIGIN, qui
+  // perd le chemin. Sur GitHub Pages l'appli vit sous /chantier/, donc le client
+  // atterrissait sur la racine du domaine (404) et la reprise ne se declenchait
+  // jamais. Ce parametre prime sur le "Site URL" du tableau de bord Supabase :
+  // le corriger la-bas ne suffit pas, il faut le passer ici.
+  function urlRetour() {
+    try {
+      return location.origin + location.pathname.replace(/[^/]*$/, "");
+    } catch (_) {
+      return undefined; // repli : Supabase utilisera son Site URL
+    }
+  }
+
   // Appelee au demarrage : si une session est ouverte mais qu'aucun profil n'existe
   // encore, c'est que l'utilisateur revient de son e-mail de confirmation.
   async function finaliserInscriptionEnAttente() {
@@ -227,7 +241,10 @@
     },
     async signUpPatron(email, password, nomEntreprise, nomPatron) {
       const c = client();
-      const { data, error } = await c.auth.signUp({ email: (email || "").trim(), password });
+      const { data, error } = await c.auth.signUp({
+        email: (email || "").trim(), password,
+        options: { emailRedirectTo: urlRetour() },
+      });
       boom(error, "Inscription impossible.");
       if (emailDejaPris(data)) throw new Error("email-deja-utilise");
       // Pas de session = confirmation d'e-mail exigee : on differe la creation.
@@ -244,7 +261,10 @@
     },
     async signUpEmploye(email, password, code, nom) {
       const c = client();
-      const { data, error } = await c.auth.signUp({ email: (email || "").trim(), password });
+      const { data, error } = await c.auth.signUp({
+        email: (email || "").trim(), password,
+        options: { emailRedirectTo: urlRetour() },
+      });
       boom(error, "Inscription impossible.");
       if (emailDejaPris(data)) throw new Error("email-deja-utilise");
       if (!data || !data.session) {
