@@ -151,13 +151,69 @@
     return me;
   }
 
+  // ---------- Inscription en deux temps (confirmation d'e-mail) ----------
+  // Quand "Confirm email" est actif cote Supabase, signUp N'OUVRE PAS de session :
+  // l'utilisateur doit d'abord cliquer le lien recu. Or creer_entreprise et
+  // rejoindre_entreprise exigent une session (EXECUTE est retire a anon), donc
+  // les appeler dans la foulee echoue avec "permission denied for function".
+  // On memorise donc ce qui a ete saisi, et on finalise au retour de l'utilisateur.
+  const CLE_INSCRIPTION = "chantier_inscription_en_attente";
+
+  function memoriserInscription(donnees) {
+    try { localStorage.setItem(CLE_INSCRIPTION, JSON.stringify(donnees)); } catch (_) {}
+  }
+  function lireInscription() {
+    try { return JSON.parse(localStorage.getItem(CLE_INSCRIPTION) || "null"); } catch (_) { return null; }
+  }
+  function oublierInscription() {
+    try { localStorage.removeItem(CLE_INSCRIPTION); } catch (_) {}
+  }
+
+  // Supabase ne dit pas franchement "cet email existe deja" (ce serait un moyen
+  // de deviner qui est inscrit) : il renvoie un utilisateur sans aucune identite.
+  function emailDejaPris(data) {
+    return !!(data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0);
+  }
+
+  // Appelee au demarrage : si une session est ouverte mais qu'aucun profil n'existe
+  // encore, c'est que l'utilisateur revient de son e-mail de confirmation.
+  async function finaliserInscriptionEnAttente() {
+    const att = lireInscription();
+    if (!att) return null;
+    const c = client();
+    const { data: sess } = await c.auth.getSession();
+    if (!sess || !sess.session) return null; // pas encore confirme : on garde en attente
+
+    if (att.type === "patron") {
+      const { error } = await c.rpc("creer_entreprise", {
+        p_nom_entreprise: att.nomEntreprise, p_nom_patron: att.nom, p_couleur: "#38bdf8",
+      });
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await c.rpc("rejoindre_entreprise", {
+        p_code: att.code, p_nom: att.nom, p_couleur: "#34d399",
+      });
+      if (error) throw new Error(error.message);
+    }
+    oublierInscription();
+    return chargerProfil();
+  }
+
   const SupabaseBackend = {
     // --- Demarrage : restaure la session et charge le profil ---
     async init() {
       client();
       await chargerProfil();
+      // Session ouverte mais pas de profil = retour du lien de confirmation.
+      if (!me) {
+        try { await finaliserInscriptionEnAttente(); }
+        catch (e) { console.warn("finalisation inscription:", e); }
+      }
       return true;
     },
+    // Expose l'etat d'attente pour que l'ecran de connexion sache quoi afficher.
+    inscriptionEnAttente() { return lireInscription(); },
+    annulerInscriptionEnAttente() { oublierInscription(); },
 
     // --- Authentification (utilisee par le vrai ecran de connexion) ---
     estCloud: true,
@@ -171,22 +227,35 @@
     },
     async signUpPatron(email, password, nomEntreprise, nomPatron) {
       const c = client();
-      const { error } = await c.auth.signUp({ email: (email || "").trim(), password });
-      boom(error, "Inscription impossible (email deja utilise ?).");
+      const { data, error } = await c.auth.signUp({ email: (email || "").trim(), password });
+      boom(error, "Inscription impossible.");
+      if (emailDejaPris(data)) throw new Error("email-deja-utilise");
+      // Pas de session = confirmation d'e-mail exigee : on differe la creation.
+      if (!data || !data.session) {
+        memoriserInscription({ type: "patron", nomEntreprise: nomEntreprise, nom: nomPatron });
+        throw new Error("email-a-confirmer");
+      }
       const { error: e2 } = await c.rpc("creer_entreprise", {
         p_nom_entreprise: nomEntreprise, p_nom_patron: nomPatron, p_couleur: "#38bdf8",
       });
       boom(e2);
+      oublierInscription();
       return chargerProfil();
     },
     async signUpEmploye(email, password, code, nom) {
       const c = client();
-      const { error } = await c.auth.signUp({ email: (email || "").trim(), password });
-      boom(error, "Inscription impossible (email deja utilise ?).");
+      const { data, error } = await c.auth.signUp({ email: (email || "").trim(), password });
+      boom(error, "Inscription impossible.");
+      if (emailDejaPris(data)) throw new Error("email-deja-utilise");
+      if (!data || !data.session) {
+        memoriserInscription({ type: "employe", code: code, nom: nom });
+        throw new Error("email-a-confirmer");
+      }
       const { error: e2 } = await c.rpc("rejoindre_entreprise", {
         p_code: code, p_nom: nom, p_couleur: "#34d399",
       });
       boom(e2, "Code entreprise invalide.");
+      oublierInscription();
       return chargerProfil();
     },
     // Cas : compte cree mais sans entreprise (rare). Permet de finir l'onboarding.

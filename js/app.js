@@ -263,8 +263,22 @@
           render();
         } catch (e) {
           const msg = String(e && e.message || e);
+          // "email-a-confirmer" n'est pas un echec : le compte est cree, il ne
+          // manque que le clic dans l'e-mail. On l'annonce donc en vert.
+          if (msg === "email-a-confirmer") {
+            err.style.color = "#34d399";
+            err.textContent = "Compte cree. Ouvrez l'e-mail que nous venons de vous envoyer et cliquez sur le lien : "
+              + (mode === "creer" ? "votre entreprise sera creee" : "vous rejoindrez l'equipe")
+              + " a votre retour. Pensez a regarder vos courriers indesirables.";
+            go.disabled = true;
+            go.textContent = "En attente de confirmation";
+            return;
+          }
+          err.style.color = "";
           err.textContent = msg === "no-profile"
             ? "Ce compte n'est rattache a aucune entreprise. Utilisez \"Rejoindre\" avec un code, ou creez une entreprise."
+            : msg === "email-deja-utilise"
+            ? "Cette adresse a deja un compte. Utilisez \"Se connecter\", ou choisissez une autre adresse."
             : msg;
           go.disabled = false;
           go.textContent = mode === "creer" ? "Creer mon entreprise" : mode === "rejoindre" ? "Rejoindre l'equipe" : "Se connecter";
