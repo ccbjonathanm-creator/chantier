@@ -182,6 +182,38 @@
     return renderLoginDemo();
   }
 
+  // Selecteur de mode, present sur les DEUX ecrans de connexion : sans lui, le
+  // seul chemin vers la creation de compte passait par les reglages, donc il
+  // fallait d'abord entrer dans la demo. Un client n'avait aucune chance de le
+  // trouver.
+  function modeSwitchHTML(cloud) {
+    return `
+      <div class="mode-switch" role="group" aria-label="Choisir le mode">
+        <button type="button" data-mode="demo" class="${cloud ? "" : "on"}" aria-pressed="${cloud ? "false" : "true"}">
+          Essayer la demo
+        </button>
+        <button type="button" data-mode="supabase" class="${cloud ? "on" : ""}" aria-pressed="${cloud ? "true" : "false"}">
+          Mon entreprise
+        </button>
+      </div>
+      <p class="mode-hint">${cloud
+        ? "Connectez-vous ou creez votre entreprise. Vos donnees sont synchronisees entre le patron et les employes."
+        : "La demo est un chantier fictif, pour visiter l'application sans compte. Choisissez <b>Mon entreprise</b> pour creer le votre."}</p>`;
+  }
+
+  // Branche le selecteur. Le backend est choisi au chargement du module, donc
+  // on recharge la page apres l'avoir change.
+  function brancherModeSwitch(wrap, cloud) {
+    wrap.querySelectorAll(".mode-switch button").forEach((b) => {
+      b.addEventListener("click", () => {
+        const vise = b.dataset.mode;
+        if ((vise === "supabase") === cloud) return; // deja dans ce mode
+        try { localStorage.setItem(BACKEND_KEY, vise); } catch (e) {}
+        location.reload();
+      });
+    });
+  }
+
   // ---------- Connexion CLOUD (email + mot de passe, Supabase) ----------
   async function renderLoginCloud() {
     let mode = "connexion"; // connexion | creer | rejoindre
@@ -223,6 +255,7 @@
             <p class="tag">Le planning et les heures de votre equipe, sur le terrain.</p>
           </div>
           <div class="login-card">
+            ${modeSwitchHTML(true)}
             <div class="seg">
               <button data-m="connexion" class="${mode === "connexion" ? "on" : ""}">Se connecter</button>
               <button data-m="creer" class="${mode === "creer" ? "on" : ""}">Nouvelle entreprise</button>
@@ -237,6 +270,7 @@
       wrap.querySelectorAll(".seg button").forEach((b) => {
         b.addEventListener("click", () => { mode = b.dataset.m; dessiner(); });
       });
+      brancherModeSwitch(wrap, true);
       const err = wrap.querySelector("#err");
       const go = wrap.querySelector("#go");
       const val = (id) => { const n = wrap.querySelector("#" + id); return n ? n.value.trim() : ""; };
@@ -306,11 +340,12 @@
           <p class="tag">Le planning et les heures de votre equipe, sur le terrain.</p>
         </div>
         <div class="login-card">
-          <p class="login-hint">Mode demonstration. Choisissez un profil pour tester :</p>
+          ${modeSwitchHTML(false)}
+          <p class="login-hint">Choisissez un profil pour visiter l'application :</p>
           <div class="profils"></div>
           <button class="ghost-btn" id="reset-demo">Reinitialiser la demo</button>
         </div>
-        <p class="foot">Version demo locale. La synchro cloud entre patron et employes sera branchee ensuite.</p>
+        <p class="foot">Les donnees de la demo restent sur cet appareil et ne partent nulle part.</p>
       </div>
     `);
     const list = wrap.querySelector(".profils");
@@ -337,6 +372,7 @@
       await api.resetDemo();
       renderLogin();
     });
+    brancherModeSwitch(wrap, false);
     app.appendChild(wrap);
   }
 
