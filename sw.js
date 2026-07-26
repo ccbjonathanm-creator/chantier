@@ -1,6 +1,7 @@
 /* Service worker Chantier : reseau d'abord sur le code (MAJ auto), cache en secours. */
-const CACHE = "chantier-v27";
+const CACHE = "chantier-v28";
 const ASSETS = [
+  './mesure.js',
   "./",
   "./index.html",
   "./css/style.css",
