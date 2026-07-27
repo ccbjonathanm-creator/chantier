@@ -1,9 +1,10 @@
 /* Service worker Chantier : reseau d'abord sur le code (MAJ auto), cache en secours. */
-const CACHE = "chantier-v28";
+const CACHE = "chantier-v29";
 const ASSETS = [
   './mesure.js',
   "./",
   "./index.html",
+  "./garde-style.js",
   "./css/style.css",
   "./css/premium.css",
   "./assets/clicchantier-3d-hero.webp",
@@ -36,10 +37,12 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
         return res;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
+      .catch(() => caches.match(e.request).then((r) => r || (e.request.mode === 'navigate' ? caches.match("./index.html") : Response.error())))
   );
 });
