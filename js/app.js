@@ -15,6 +15,15 @@
   const api = window.Chantier.api;
   const { todayISO } = window.Chantier.util;
   const app = document.getElementById("app");
+  const CLIENT_DRAFT_KEY = "clicchantier_brouillon_client_v1";
+
+  function lireBrouillonClient() {
+    try { return JSON.parse(sessionStorage.getItem(CLIENT_DRAFT_KEY) || "null"); }
+    catch (e) { return null; }
+  }
+  function effacerBrouillonClient() {
+    try { sessionStorage.removeItem(CLIENT_DRAFT_KEY); } catch (e) {}
+  }
 
   // Mode LECTURE SEULE : abonnement ferme (essai expire, past_due, impaye,
   // resilie hors periode payee). La consultation des donnees reste possible,
@@ -24,8 +33,8 @@
   (function protegerEcritures() {
     const METHODES = ["createIntervention", "updateIntervention", "deleteIntervention",
       "setStatut", "demarrerPointage", "terminerPointage", "ajouterNote", "supprimerNote",
-      "createClient", "updateClient", "createCatalogCategory", "createCatalogItem",
-      "updateCatalogItem", "linkInterventionClient"];
+      "createClient", "updateClient", "archiveClient", "createCatalogCategory", "createCatalogItem",
+      "updateCatalogItem", "archiveCatalogItem", "linkInterventionClient", "archiverDevisBrouillon"];
     METHODES.forEach((m) => {
       if (!api || typeof api[m] !== "function") return;
       const orig = api[m].bind(api);
@@ -336,13 +345,12 @@
           render();
         } catch (e) {
           const msg = String(e && e.message || e);
-          // "email-a-confirmer" n'est pas un echec : le compte est cree, il ne
-          // manque que le clic dans l'e-mail. On l'annonce donc en vert.
+          // Supabase masque volontairement l'existence d'un compte. Le même
+          // retour peut donc signifier création, compte déjà en attente ou
+          // nouvel envoi. Le texte reste volontairement honnête.
           if (msg === "email-a-confirmer") {
             err.style.color = "#34d399";
-            err.textContent = "Compte créé. Ouvrez l'e-mail que nous venons de vous envoyer et cliquez sur le lien : "
-              + (mode === "creer" ? "votre entreprise sera créée" : "vous rejoindrez l'équipe")
-              + " à votre retour. Pensez à regarder vos courriers indésirables.";
+            err.textContent = "Vérifiez votre messagerie. Si cette adresse vient d'être inscrite ou attend déjà une confirmation, utilisez le dernier lien reçu. Pensez aussi aux courriers indésirables.";
             go.disabled = true;
             go.textContent = "En attente de confirmation";
             return;
@@ -541,7 +549,7 @@
           <div class="sheet-body">
             <div class="reg-bloc">
               <div class="reg-titre">${ICON.spark} Assistant vocal IA</div>
-              <p class="reg-txt">Pour transformer les notes vocales de chantier en comptes-rendus propres, collez votre clé Groq personnelle. Elle reste sur cet appareil, jamais enregistrée dans ClicChantier.</p>
+              <p class="reg-txt">Pour transformer les notes vocales de chantier en comptes-rendus propres, collez votre clé Groq personnelle. Elle est stockée sur cet appareil, puis transmise directement à api.groq.com à chaque appel. Elle n'est jamais enregistrée dans la base ClicChantier.</p>
               <label>Clé Groq<input id="f-key" type="password" placeholder="gsk_..." value="${esc(ia.getKey())}"></label>
               <p class="reg-hint">La création et l'usage de cette clé dépendent des conditions de Groq. Sans clé, la dictée et la structuration locale restent disponibles.</p>
             </div>
@@ -762,11 +770,12 @@
       state.socleVue = "clients";
       return viewClients();
     }
-    const c = client || {
+    const brouillon = !client ? lireBrouillonClient() : null;
+    const c = client || Object.assign({
       kind: "individual", displayName: "", legalName: "", siren: "", vatNumber: "",
       billingAddressLine1: "", billingAddressLine2: "", billingPostalCode: "", billingCity: "",
       billingCountryCode: "FR",
-    };
+    }, brouillon || {});
     const root = el(`
       <section class="page socle-page">
         <div id="client-back"></div>
@@ -786,7 +795,8 @@
             <label>Ville<input id="client-city" value="${esc(c.billingCity)}"></label>
             <label>Pays<input id="client-country" maxlength="2" value="${esc(c.billingCountryCode)}"></label>
           </div>
-          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : '<button class="primary" type="submit">Enregistrer la fiche</button>'}
+          ${brouillon ? '<p class="module-warning">Brouillon restauré après le rechargement de la page.</p>' : ""}
+          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : `<div class="devis-actions"><button class="primary" type="submit">Enregistrer la fiche</button>${client ? '<button class="danger-text" id="archive-client" type="button">Archiver ce client</button>' : ""}</div>`}
         </form>
       </section>`);
     root.querySelector("#client-back").appendChild(retourSocle("Clients", "clients"));
@@ -796,30 +806,47 @@
     const afficherLegal = () => { legalWrap.hidden = kind.value !== "company"; };
     kind.addEventListener("change", afficherLegal);
     afficherLegal();
-    root.querySelector("#client-form").addEventListener("submit", async (e) => {
+    const clientForm = root.querySelector("#client-form");
+    const payloadClient = () => ({
+      kind: kind.value,
+      displayName: root.querySelector("#client-display").value.trim(),
+      legalName: root.querySelector("#client-legal").value.trim(),
+      siren: root.querySelector("#client-siren").value.trim(),
+      vatNumber: root.querySelector("#client-vat").value.trim(),
+      billingAddressLine1: root.querySelector("#client-address1").value.trim(),
+      billingAddressLine2: root.querySelector("#client-address2").value.trim(),
+      billingPostalCode: root.querySelector("#client-postal").value.trim(),
+      billingCity: root.querySelector("#client-city").value.trim(),
+      billingCountryCode: (root.querySelector("#client-country").value.trim() || "FR").toUpperCase(),
+    });
+    if (!client) clientForm.addEventListener("input", () => {
+      try { sessionStorage.setItem(CLIENT_DRAFT_KEY, JSON.stringify(payloadClient())); } catch (e) {}
+    });
+    clientForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (enLectureSeule()) return;
-      const payload = {
-        kind: kind.value,
-        displayName: root.querySelector("#client-display").value.trim(),
-        legalName: root.querySelector("#client-legal").value.trim(),
-        siren: root.querySelector("#client-siren").value.trim(),
-        vatNumber: root.querySelector("#client-vat").value.trim(),
-        billingAddressLine1: root.querySelector("#client-address1").value.trim(),
-        billingAddressLine2: root.querySelector("#client-address2").value.trim(),
-        billingPostalCode: root.querySelector("#client-postal").value.trim(),
-        billingCity: root.querySelector("#client-city").value.trim(),
-        billingCountryCode: (root.querySelector("#client-country").value.trim() || "FR").toUpperCase(),
-      };
+      const payload = payloadClient();
       if (!payload.displayName) return montrerToast("Le nom du client est obligatoire.", "attente");
       if (payload.kind === "company" && !payload.legalName) return montrerToast("La raison sociale est obligatoire pour une entreprise.", "attente");
       if (!/^[A-Z]{2}$/.test(payload.billingCountryCode)) return montrerToast("Le pays doit contenir deux lettres.", "attente");
       try {
         const saved = client ? await api.updateClient(client.id, payload) : await api.createClient(payload);
+        effacerBrouillonClient();
         state.clientId = saved.id;
         montrerToast("Fiche client enregistrée.", "ok");
         render();
       } catch (err) { montrerToast(err.message || "Enregistrement impossible.", "attente"); }
+    });
+    const archiver = root.querySelector("#archive-client");
+    if (archiver) archiver.addEventListener("click", async () => {
+      if (!confirm("Archiver ce client inutilisé ?")) return;
+      try {
+        await api.archiveClient(client.id);
+        state.clientId = null;
+        state.socleVue = "clients";
+        montrerToast("Client archivé.", "ok");
+        render();
+      } catch (e) { montrerToast(e.message || "Archivage impossible.", "attente"); }
     });
     return shell(root);
   }
@@ -1191,14 +1218,18 @@
       liste.innerHTML = '<p class="empty">Aucune facture. Ouvrez un devis accepté pour en préparer une.</p>';
     } else {
       factures.forEach((f) => {
-        const st = FACTURE_STATUT[f.statut] || { libelle: f.statut, classe: "" };
+        const estAvoir = f.genre === "avoir";
+        const stBase = FACTURE_STATUT[f.statut] || { libelle: f.statut, classe: "" };
+        const libelleStatut = estAvoir
+          ? ({ brouillon: "Brouillon", valide: "Validé", emise: "Émis", payee: "Soldé", annulee: "Annulé" }[f.statut] || stBase.libelle)
+          : stBase.libelle;
         const card = el(`
           <button class="socle-card" type="button">
             <span>
-              <strong>${esc(f.numero || "Brouillon sans numéro")}</strong>
+              <strong>${estAvoir ? "Avoir · " : ""}${esc(f.numero || "Brouillon sans numéro")}</strong>
               <small>${esc(nomClient(f.clientId))} · ${euro(f.totalTTC)} TTC</small>
             </span>
-            <span class="mod-badge ${st.classe}">${st.libelle}</span>
+            <span class="mod-badge ${stBase.classe}">${libelleStatut}</span>
           </button>`);
         card.addEventListener("click", () => {
           state.factureId = f.id;
@@ -1264,18 +1295,26 @@
     if (!facture) { state.socleVue = "factures"; return render(); }
     const rafraichir = async () => { facture = await api.getFacture(factureId); };
 
-    const st = FACTURE_STATUT[facture.statut] || { libelle: facture.statut, classe: "" };
+    const estAvoir = facture.genre === "avoir";
+    const nomDocument = estAvoir ? "avoir" : "facture";
+    const stBase = FACTURE_STATUT[facture.statut] || { libelle: facture.statut, classe: "" };
+    const st = {
+      classe: stBase.classe,
+      libelle: estAvoir
+        ? ({ brouillon: "Brouillon", valide: "Validé", emise: "Émis", payee: "Soldé", annulee: "Annulé" }[facture.statut] || stBase.libelle)
+        : stBase.libelle,
+    };
     const emise = facture.statut === "emise" || facture.statut === "payee";
     const root = el(`
       <section class="page socle-page">
         <div id="fact-back"></div>
         <div class="socle-head">
-          <div><p class="eyebrow">Facture</p>
+          <div><p class="eyebrow">${estAvoir ? "Avoir" : "Facture"}</p>
           <h1>${esc(facture.numero || "Brouillon")}</h1>
           <p>${esc(facture.clientSnapshot.nom || "")}</p></div>
           <span class="mod-badge ${st.classe}">${st.libelle}</span>
         </div>
-        ${emise ? '<div class="module-warning">Cette facture est émise : elle est immuable. Une correction se fait par un avoir.</div>' : ""}
+        ${emise ? `<div class="module-warning">${estAvoir ? "Cet avoir" : "Cette facture"} est ${estAvoir ? "émis" : "émise"} : ${estAvoir ? "il" : "elle"} est immuable.${estAvoir ? "" : " Une correction se fait par un avoir."}</div>` : ""}
         <div class="module-card">
           <div class="module-card-title"><h2>Lignes</h2><span id="fact-nb"></span></div>
           <div class="module-list-table" id="fact-lignes"></div>
@@ -1319,18 +1358,29 @@
     imprimer.addEventListener("click", () => ouvrirDocumentFacture(facture));
     actions.appendChild(imprimer);
     if (facture.statut === "brouillon") {
-      const b = el('<button class="primary" type="button">Valider la facture</button>');
+      const b = el(`<button class="primary" type="button">Valider ${estAvoir ? "l'avoir" : "la facture"}</button>`);
       b.addEventListener("click", async () => {
-        if (!confirm("Valider cette facture ? Les lignes seront verrouillées.")) return;
+        if (!confirm(`Valider ${estAvoir ? "cet avoir" : "cette facture"} ? Les lignes seront verrouillées.`)) return;
         try { await api.changerStatutFacture(factureId, "valide", state.me.id); await rafraichir(); render(); }
         catch (e) { alert(e.message); }
       });
       actions.appendChild(b);
+      const annuler = el(`<button class="danger-text" type="button">Retirer ce brouillon ${nomDocument}</button>`);
+      annuler.addEventListener("click", async () => {
+        if (!confirm(`Retirer définitivement ce brouillon ${nomDocument} des listes ?`)) return;
+        try {
+          await api.changerStatutFacture(factureId, "annulee", state.me.id);
+          state.factureId = null;
+          state.socleVue = "factures";
+          render();
+        } catch (e) { alert(e.message); }
+      });
+      actions.appendChild(annuler);
       actions.appendChild(el('<p class="reg-hint">La validation verrouille les lignes. Aucun numéro n\'est attribué à cette étape.</p>'));
     } else if (facture.statut === "valide") {
-      const b = el('<button class="primary" type="button">Émettre la facture</button>');
+      const b = el(`<button class="primary" type="button">Émettre ${estAvoir ? "l'avoir" : "la facture"}</button>`);
       b.addEventListener("click", async () => {
-        if (!confirm("Émettre définitivement cette facture ? Elle recevra son numéro et deviendra immuable.")) return;
+        if (!confirm(`Émettre définitivement ${estAvoir ? "cet avoir" : "cette facture"} ? ${estAvoir ? "Il" : "Elle"} recevra son numéro et deviendra immuable.`)) return;
         try { await api.emettreFacture(factureId); await rafraichir(); render(); }
         catch (e) { alert(e.message); }
       });
@@ -1444,6 +1494,9 @@
     const devis = await api.getDevis(devisId);
     if (!devis) { state.socleVue = "devis"; return render(); }
     const brouillon = devis.statut === "brouillon";
+    const factureExistante = devis.statut === "accepte"
+      ? (await api.listFactures()).find((f) => f.devisId === devisId && f.genre !== "avoir")
+      : null;
     const st = DEVIS_STATUT[devis.statut] || { libelle: devis.statut, classe: "" };
 
     const root = el(`
@@ -1671,6 +1724,17 @@
     if (devis.statut === "brouillon") {
       actions.appendChild(bouton("Valider le devis", "primary", "valide",
         "Valider ce devis ? Les lignes seront verrouillées."));
+      const archiver = el('<button class="danger-text" type="button">Retirer ce brouillon</button>');
+      archiver.addEventListener("click", async () => {
+        if (!confirm("Retirer définitivement ce brouillon des listes ?")) return;
+        try {
+          await api.archiverDevisBrouillon(devisId);
+          state.devisId = null;
+          state.socleVue = "devis";
+          render();
+        } catch (e) { alert(e.message); }
+      });
+      actions.appendChild(archiver);
       actions.appendChild(el('<p class="reg-hint">La validation verrouille les lignes. Rien n\'est envoyé au client à cette étape.</p>'));
     } else if (devis.statut === "valide") {
       actions.appendChild(bouton("Marquer comme envoyé", "primary", "envoye",
@@ -1680,28 +1744,39 @@
       actions.appendChild(bouton("Le client a accepté", "primary", "accepte"));
       actions.appendChild(bouton("Le client a refusé", "ghost2", "refuse"));
     } else if (devis.statut === "accepte") {
-      // Le devis accepté devient une facture. Les lignes sont recopiées,
-      // le devis reste intact.
-      const versFacture = el('<button class="primary" type="button">Préparer la facture</button>');
-      versFacture.addEventListener("click", async () => {
-        try {
-          const facture = await api.creerFactureDepuisDevis(devisId);
+      if (factureExistante) {
+        const ouvrirFacture = el(`<button class="primary" type="button">Ouvrir ${esc(factureExistante.numero || "la facture préparée")}</button>`);
+        ouvrirFacture.addEventListener("click", () => {
           state.socleVue = "factureFiche";
-          state.factureId = facture.id;
+          state.factureId = factureExistante.id;
           render();
-        } catch (e) { alert(e.message); }
-      });
-      actions.appendChild(versFacture);
+        });
+        actions.appendChild(ouvrirFacture);
+        actions.appendChild(el('<p class="reg-hint">Une facture existe déjà pour ce devis. Aucun nouveau brouillon ne sera créé.</p>'));
+      } else {
+        // Le devis accepté devient une facture. Les lignes sont recopiées,
+        // le devis reste intact.
+        const versFacture = el('<button class="primary" type="button">Préparer la facture</button>');
+        versFacture.addEventListener("click", async () => {
+          try {
+            const facture = await api.creerFactureDepuisDevis(devisId);
+            state.socleVue = "factureFiche";
+            state.factureId = facture.id;
+            render();
+          } catch (e) { alert(e.message); }
+        });
+        actions.appendChild(versFacture);
 
-      // ⭐ Le cœur du produit : facturer ce qui s'est VRAIMENT passé.
-      const versReel = el('<button class="primary" type="button">Facturer depuis le réel</button>');
-      versReel.addEventListener("click", async () => {
-        state.socleVue = "factureReelle";
-        state.devisId = devisId;
-        render();
-      });
-      actions.appendChild(versReel);
-      actions.appendChild(el('<p class="reg-hint">« Depuis le devis » recopie ce qui était prévu. « Depuis le réel » part des heures pointées et des matériaux consommés, et vous signale les écarts.</p>'));
+        // ⭐ Le cœur du produit : facturer ce qui s'est VRAIMENT passé.
+        const versReel = el('<button class="primary" type="button">Facturer depuis le réel</button>');
+        versReel.addEventListener("click", async () => {
+          state.socleVue = "factureReelle";
+          state.devisId = devisId;
+          render();
+        });
+        actions.appendChild(versReel);
+        actions.appendChild(el('<p class="reg-hint">« Depuis le devis » recopie ce qui était prévu. « Depuis le réel » part des heures pointées et des matériaux consommés, et vous signale les écarts.</p>'));
+      }
     }
 
     peindreLignes();
@@ -1827,7 +1902,7 @@
             <label>TVA (%)<input id="item-vat" type="number" min="0" max="100" step="0.01" value="${esc(i.vatRate)}"></label>
             <label>Coût d'achat HT<input id="item-purchase" type="number" min="0" step="0.01" value="${i.purchasePriceExclTax == null ? "" : esc(i.purchasePriceExclTax)}"></label>
           </div>
-          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : '<button class="primary" type="submit">Enregistrer l\'article</button>'}
+          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : `<div class="devis-actions"><button class="primary" type="submit">Enregistrer l'article</button>${item ? '<button class="danger-text" id="archive-item" type="button">Archiver cet article</button>' : ""}</div>`}
         </form>
       </section>`);
     root.querySelector("#catalog-back").appendChild(retourSocle("Catalogue", "catalogue"));
@@ -1865,6 +1940,17 @@
         montrerToast("Article de catalogue enregistré.", "ok");
         render();
       } catch (err) { montrerToast(err.message || "Enregistrement impossible.", "attente"); }
+    });
+    const archiver = root.querySelector("#archive-item");
+    if (archiver) archiver.addEventListener("click", async () => {
+      if (!confirm("Archiver cet article inutilisé ?")) return;
+      try {
+        await api.archiveCatalogItem(item.id);
+        state.catalogItemId = null;
+        state.socleVue = "catalogue";
+        montrerToast("Article archivé.", "ok");
+        render();
+      } catch (e) { montrerToast(e.message || "Archivage impossible.", "attente"); }
     });
     return shell(root);
   }
@@ -2539,7 +2625,7 @@
               ${enCours ? '<span class="badge b-run">En intervention</span>' : ""}
             </div>
             <div class="team-stats">
-              <div><span class="big">${totalMs > 0 ? dureeStr(totalMs) : "0h00"}</span><span class="lab">pointees</span></div>
+              <div><span class="big">${totalMs > 0 ? dureeStr(totalMs) : "0h00"}</span><span class="lab">pointées</span></div>
               <div><span class="big">${nbFait}/${nbInter}</span><span class="lab">chantiers</span></div>
             </div>
           </div>
@@ -2608,7 +2694,7 @@
     }
     if (it.adresse) {
       const q = encodeURIComponent(it.adresse);
-      zone.appendChild(el(`<a class="act-btn" href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">${ICON.map}Itineraire</a>`));
+      zone.appendChild(el(`<a class="act-btn" href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">${ICON.map}Itinéraire</a>`));
     }
     // Suivi de chantier (note vocale + IA)
     const nbNotes = (it.journal || []).length;
@@ -2693,6 +2779,20 @@
     render();
   }
 
+  // Le mode démonstration partage localStorage entre les onglets. Lorsqu'un
+  // autre onglet écrit une version plus récente, on actualise si aucun champ
+  // n'est en cours de saisie, sinon on l'annonce sans effacer le formulaire.
+  window.addEventListener("storage", (event) => {
+    if (api.estCloud || event.key !== "chantier_demo_v3" || !state.me) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (document.querySelector(".modal, .asst-screen") || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+      montrerToast("Des données plus récentes sont disponibles dans un autre onglet. Rechargez après avoir terminé votre saisie.", "info");
+      return;
+    }
+    montrerToast("Données mises à jour depuis un autre onglet.", "ok");
+    render();
+  });
+
   // ---------- Espace Modules ----------
   async function viewModules() {
     const actives = modulesActifsCharges();
@@ -2702,9 +2802,9 @@
       vue.appendChild(contenu);
       // Certains modules (ceux de la gestion) posent deja leur propre retour :
       // on n'en ajoute un que la ou il manque, sinon il apparait en double.
-      if (!vue.querySelector("[data-retour]")) {
+      if (!vue.querySelector("[data-retour], .pl-back")) {
         const retour = el('<button class="socle-back" type="button">&lsaquo; Modules</button>');
-        retour.addEventListener("click", () => { state.moduleCle = null; render(); });
+        retour.addEventListener("click", () => window.Chantier.allerModules());
         vue.insertBefore(retour, vue.firstChild);
       }
       return shell(vue);
@@ -2730,6 +2830,7 @@
       card.addEventListener("click", () => {
         state.moduleCle = cle;
         if (window.Chantier[cle].reset) window.Chantier[cle].reset();
+        history.pushState({ clicchantierModule: cle }, "", "#module=" + encodeURIComponent(cle));
         render();
       });
       grid.appendChild(card);
@@ -2801,9 +2902,19 @@
     return viewTournee();
   }
 
+  let explorationSignalee = false;
   async function render() {
     try {
-      return await renderInterne();
+      const resultat = await renderInterne();
+      if (state.me && !explorationSignalee) {
+        explorationSignalee = true;
+        setTimeout(() => {
+          if (!state.me) return;
+          window.CLICCHANTIER_EXPLORE = true;
+          window.dispatchEvent(new Event("clicchantier:explore"));
+        }, 12000);
+      }
+      return resultat;
     } catch (error) {
       afficherErreurGlobale(error);
       return null;
@@ -2816,6 +2927,10 @@
   window.Chantier.moiId = function () { return state.me ? state.me.id : null; };
   window.Chantier.allerModules = function () {
     state.onglet = "modules";
+    if (state.moduleCle && history.state && history.state.clicchantierModule) {
+      history.back();
+      return;
+    }
     state.moduleCle = null;
     render();
   };
@@ -2825,6 +2940,13 @@
     if (iso) { state.date = iso; state.vue = "jour"; }
     render();
   };
+
+  window.addEventListener("popstate", (event) => {
+    if (!state.me || state.onglet !== "modules") return;
+    const cle = event.state && event.state.clicchantierModule;
+    state.moduleCle = cle && modulesActifsCharges().indexOf(cle) !== -1 ? cle : null;
+    render();
+  });
 
   // ---------- Demarrage ----------
   async function boot() {
@@ -2869,6 +2991,10 @@
     if (sess) {
       state.me = sess;
       state.onglet = sess.role === "patron" ? "planning" : "tournee";
+      if (sess.role === "patron" && lireBrouillonClient()) {
+        state.socleVue = "client";
+        state.clientId = null;
+      }
       employesCache = await api.listEmployes();
     }
     render();

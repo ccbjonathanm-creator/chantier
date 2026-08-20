@@ -189,7 +189,7 @@
   async function sectionAccueil() {
     const infos = await store.infos();
     const cont = el(`<div class="page pl-page"></div>`);
-    cont.appendChild(enteteSection("Pack Electricien", "Vos outils metier", undefined));
+    cont.appendChild(enteteSection("Pack Électricien", "Vos outils métier", undefined));
 
     const grid = el(`<div class="pl-cards"></div>`);
     grid.appendChild(carteNav(I.calc, "Calculateurs NF C 15-100", "Puissance, section de cable, chute de tension", () => go("calc")));
@@ -614,7 +614,7 @@
         await store.setInfos(nd);
         close();
         repaint();
-        toast("Infos entreprise enregistrees.");
+        toast("Infos entreprise enregistrées.");
       });
       document.getElementById("app").appendChild(sheet);
     });
@@ -651,7 +651,7 @@
               </select></label>
               <label>Description des travaux<textarea id="k-desc" rows="2" placeholder="Ex : refection du tableau, mise a la terre, 3 circuits prises..."></textarea></label>
               <div class="ec-ctrl-box">
-                <div class="sig-lab">Points controles</div>
+                <div class="sig-lab">Points contrôlés</div>
                 ${controlesHtml}
               </div>
               <label>Reserves / observations<textarea id="k-obs" rows="2" placeholder="Ex : aucune reserve"></textarea></label>
@@ -660,7 +660,7 @@
                 <label>Date<input id="k-date" type="date" value="${esc(todayISO())}"></label>
               </div>
               <div class="sig-bloc">
-                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
                 <canvas class="sig-pad" id="sig-k-ent"></canvas>
                 <div class="sig-actions">
                   <button type="button" class="mini" id="sig-k-ent-clear">Effacer</button>
@@ -736,7 +736,7 @@
                 <div class="sig-actions"><button type="button" class="mini" id="sig-tva-client-clear">Effacer</button></div>
               </div>
               <div class="sig-bloc">
-                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
                 <canvas class="sig-pad" id="sig-tva-ent"></canvas>
                 <div class="sig-actions">
                   <button type="button" class="mini" id="sig-tva-ent-clear">Effacer</button>
@@ -900,7 +900,7 @@
         ["Description des travaux", data.desc || "-"],
       ]);
       // Points controles (cases cochees)
-      sectionTitre("Points controles");
+      sectionTitre("Points contrôlés");
       ctx.fillStyle = "#1a2230"; ctx.font = "21px Arial";
       (data.controles && data.controles.length ? data.controles : ["Aucun point coche"]).forEach((c) => {
         const lignes = wrapTexte(ctx, c, cW - 44);

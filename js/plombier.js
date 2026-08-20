@@ -44,7 +44,7 @@
     const t2 = new Date(b + "T00:00:00").getTime();
     return Math.round((t2 - t1) / 86400000);
   }
-  const MOIS = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+  const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
   function fmtFR(iso) {
     if (!iso) return "-";
     const [y, m, d] = iso.split("-").map(Number);
@@ -86,8 +86,34 @@
   const K_CONTRATS = "chantier_contrats_v1";
   const K_CATALOGUE = "chantier_catalogue_v1";
 
+  const CORRECTIONS_TEXTE_DEMO = [
+    ["Vos outils metier", "Vos outils métier"], ["Entretiens a prevoir", "Entretiens à prévoir"],
+    ["Chaudiere", "Chaudière"], ["Pompe a chaleur", "Pompe à chaleur"],
+    ["Copropriete", "Copropriété"], ["Republique", "République"], ["Marche", "Marché"],
+    ["Lefevre", "Lefèvre"], ["electrique", "électrique"], ["Deplacement", "Déplacement"],
+    ["Debouchage", "Débouchage"], ["Desembouage", "Désembouage"],
+    ["securite", "sécurité"], ["Detartrage", "Détartrage"], ["unite", "unité"],
+  ];
+  function corrigerTexteDemo(valeur) {
+    if (typeof valeur === "string") {
+      CORRECTIONS_TEXTE_DEMO.forEach(([avant, apres]) => { valeur = valeur.split(avant).join(apres); });
+      return valeur;
+    }
+    if (Array.isArray(valeur)) return valeur.map(corrigerTexteDemo);
+    if (valeur && typeof valeur === "object") {
+      Object.keys(valeur).forEach((cle) => { valeur[cle] = corrigerTexteDemo(valeur[cle]); });
+    }
+    return valeur;
+  }
   function lire(cle, repli) {
-    try { const r = localStorage.getItem(cle); return r ? JSON.parse(r) : repli; } catch (e) { return repli; }
+    try {
+      const r = localStorage.getItem(cle);
+      if (!r) return repli;
+      const valeur = corrigerTexteDemo(JSON.parse(r));
+      const corrige = JSON.stringify(valeur);
+      if (corrige !== r) localStorage.setItem(cle, corrige);
+      return valeur;
+    } catch (e) { return repli; }
   }
   function ecrire(cle, val) {
     try { localStorage.setItem(cle, JSON.stringify(val)); } catch (e) {}
@@ -142,24 +168,24 @@
 
   // Catalogue de prestations plomberie / chauffage pre-rempli (tarifs HT indicatifs).
   const CATALOGUE_DEFAUT = [
-    { libelle: "Deplacement + diagnostic", unite: "forfait", prixHT: 45 },
-    { libelle: "Main d'oeuvre plombier", unite: "heure", prixHT: 55 },
+    { libelle: "Déplacement + diagnostic", unite: "forfait", prixHT: 45 },
+    { libelle: "Main d'œuvre plombier", unite: "heure", prixHT: 55 },
     { libelle: "Recherche de fuite", unite: "forfait", prixHT: 90 },
-    { libelle: "Remplacement mitigeur evier / lavabo", unite: "unite", prixHT: 130 },
-    { libelle: "Remplacement mecanisme de chasse WC", unite: "unite", prixHT: 110 },
-    { libelle: "Debouchage canalisation", unite: "forfait", prixHT: 120 },
-    { libelle: "Remplacement chauffe-eau electrique 200 L (pose)", unite: "forfait", prixHT: 280 },
-    { libelle: "Entretien annuel chaudiere gaz", unite: "forfait", prixHT: 130 },
-    { libelle: "Desembouage circuit de chauffage", unite: "forfait", prixHT: 550 },
-    { libelle: "Remplacement groupe de securite", unite: "unite", prixHT: 95 },
-    { libelle: "Remplacement robinet d'arret", unite: "unite", prixHT: 60 },
+    { libelle: "Remplacement mitigeur évier / lavabo", unite: "unité", prixHT: 130 },
+    { libelle: "Remplacement mécanisme de chasse WC", unite: "unité", prixHT: 110 },
+    { libelle: "Débouchage canalisation", unite: "forfait", prixHT: 120 },
+    { libelle: "Remplacement chauffe-eau électrique 200 L (pose)", unite: "forfait", prixHT: 280 },
+    { libelle: "Entretien annuel chaudière gaz", unite: "forfait", prixHT: 130 },
+    { libelle: "Désembouage circuit de chauffage", unite: "forfait", prixHT: 550 },
+    { libelle: "Remplacement groupe de sécurité", unite: "unité", prixHT: 95 },
+    { libelle: "Remplacement robinet d'arrêt", unite: "unité", prixHT: 60 },
     { libelle: "Installation et raccordement lave-vaisselle / lave-linge", unite: "forfait", prixHT: 90 },
-    { libelle: "Remplacement radiateur (pose seule)", unite: "unite", prixHT: 180 },
+    { libelle: "Remplacement radiateur (pose seule)", unite: "unité", prixHT: 180 },
     { libelle: "Pose adoucisseur d'eau (pose seule)", unite: "forfait", prixHT: 350 },
-    { libelle: "Detartrage chauffe-eau", unite: "forfait", prixHT: 140 },
+    { libelle: "Détartrage chauffe-eau", unite: "forfait", prixHT: 140 },
   ];
 
-  const TYPES_APPAREIL = ["Chaudiere gaz", "Chaudiere fioul", "Chaudiere bois / granules", "Chauffe-eau", "Pompe a chaleur", "Adoucisseur", "Climatisation", "Autre"];
+  const TYPES_APPAREIL = ["Chaudière gaz", "Chaudière fioul", "Chaudière bois / granulés", "Chauffe-eau", "Pompe à chaleur", "Adoucisseur", "Climatisation", "Autre"];
 
   // Entreprise fictive par defaut (mode demo). Editable dans Documents > Infos.
   const INFOS_DEFAUT = {
@@ -177,17 +203,17 @@
   function contratsDefaut() {
     const ilYa = (mois) => addMonthsISO(todayISO(), -mois);
     return [
-      { id: uid(), client: "M. et Mme Lefevre", adresse: "8 impasse des Vignes, 71200 Le Creusot", tel: "06 12 34 56 78",
-        appareilType: "Chaudiere gaz", appareilMarque: "Saunier Duval", appareilModele: "ThemaPlus Condens",
-        dateDernier: ilYa(13), frequenceMois: 12, montant: "135", notes: "Chaudiere au sous-sol." },
-      { id: uid(), client: "Boulangerie Moreau", adresse: "3 place du Marche, 71300 Montceau-les-Mines", tel: "03 85 57 11 22",
+      { id: uid(), client: "M. et Mme Lefèvre", adresse: "8 impasse des Vignes, 71200 Le Creusot", tel: "06 12 34 56 78",
+        appareilType: "Chaudière gaz", appareilMarque: "Saunier Duval", appareilModele: "ThemaPlus Condens",
+        dateDernier: ilYa(13), frequenceMois: 12, montant: "135", notes: "Chaudière au sous-sol." },
+      { id: uid(), client: "Boulangerie Moreau", adresse: "3 place du Marché, 71300 Montceau-les-Mines", tel: "03 85 57 11 22",
         appareilType: "Chauffe-eau", appareilMarque: "Atlantic", appareilModele: "Chauffeo 300L",
-        dateDernier: ilYa(12), frequenceMois: 12, montant: "90", notes: "Acces par l'arriere-boutique." },
-      { id: uid(), client: "Mme Garnier", adresse: "25 avenue de la Republique, 71200 Le Creusot", tel: "06 98 76 54 32",
-        appareilType: "Pompe a chaleur", appareilMarque: "Daikin", appareilModele: "Altherma 3",
+        dateDernier: ilYa(12), frequenceMois: 12, montant: "90", notes: "Accès par l'arrière-boutique." },
+      { id: uid(), client: "Mme Garnier", adresse: "25 avenue de la République, 71200 Le Creusot", tel: "06 98 76 54 32",
+        appareilType: "Pompe à chaleur", appareilMarque: "Daikin", appareilModele: "Altherma 3",
         dateDernier: ilYa(5), frequenceMois: 12, montant: "160", notes: "PAC air/eau." },
-      { id: uid(), client: "Copropriete Les Tilleuls", adresse: "15 bd H. P. Schneider, 71200 Le Creusot", tel: "03 85 00 99 11",
-        appareilType: "Chaudiere fioul", appareilMarque: "De Dietrich", appareilModele: "GT 220",
+      { id: uid(), client: "Copropriété Les Tilleuls", adresse: "15 bd H. P. Schneider, 71200 Le Creusot", tel: "03 85 00 99 11",
+        appareilType: "Chaudière fioul", appareilMarque: "De Dietrich", appareilModele: "GT 220",
         dateDernier: ilYa(10), frequenceMois: 12, montant: "220", notes: "Chaufferie collective, contacter le syndic." },
     ];
   }
@@ -221,7 +247,7 @@
   function enteteSection(titre, sousTitre, retour) {
     const h = el(`
       <div class="pl-head">
-        ${retour ? `<button class="pl-back" id="pl-back">&lsaquo; Retour</button>` : ""}
+        ${retour ? `<button class="pl-back" id="pl-back" data-retour>&lsaquo; Retour</button>` : ""}
         <div class="pl-head-txt"><h2>${esc(titre)}</h2><p>${esc(sousTitre)}</p></div>
       </div>
     `);
@@ -234,18 +260,18 @@
     const contrats = await store.contrats();
     const infos = await store.infos();
     const cont = el(`<div class="page pl-page"></div>`);
-    cont.appendChild(enteteSection("Pack Plomberie / Chauffage", "Vos outils metier", false));
+    cont.appendChild(enteteSection("Pack Plomberie / Chauffage", "Vos outils métier", false));
 
     // Bandeau de rappels d'entretien
     const dus = contrats.map((c) => ({ c, e: echeance(c) }))
       .filter((x) => x.e.etat === "retard" || x.e.etat === "bientot")
       .sort((a, b) => (a.e.prochaine || "9").localeCompare(b.e.prochaine || "9"));
     if (dus.length) {
-      const banner = el(`<div class="pl-rappels"><div class="pl-rappels-t">${I.bell} Entretiens a prevoir</div></div>`);
+      const banner = el(`<div class="pl-rappels"><div class="pl-rappels-t">${I.bell} Entretiens à prévoir</div></div>`);
       dus.slice(0, 4).forEach(({ c, e }) => {
         const txt = e.etat === "retard"
           ? `en retard depuis le ${fmtFR(e.prochaine)}`
-          : `a faire avant le ${fmtFR(e.prochaine)} (dans ${e.jours} j)`;
+          : `à faire avant le ${fmtFR(e.prochaine)} (dans ${e.jours} j)`;
         const row = el(`
           <button class="pl-rappel ${e.etat}">
             <span class="pl-rappel-c">${esc(c.client)}</span>
@@ -295,10 +321,10 @@
       return ea.localeCompare(eb);
     });
     const cont = el(`<div class="page pl-page"></div>`);
-    cont.appendChild(enteteSection("Contrats d'entretien", "Chaudieres, chauffe-eau, PAC... avec rappels", true));
+    cont.appendChild(enteteSection("Contrats d'entretien", "Chaudières, chauffe-eau, PAC... avec rappels", true));
 
     if (!contrats.length) {
-      cont.appendChild(el(`<div class="empty">Aucun contrat d'entretien.<br><span>Ajoutez vos clients sous contrat pour ne plus oublier une echeance.</span></div>`));
+      cont.appendChild(el(`<div class="empty">Aucun contrat d'entretien.<br><span>Ajoutez vos clients sous contrat pour ne plus oublier une échéance.</span></div>`));
     } else {
       const list = el(`<div class="list"></div>`);
       contrats.forEach((c) => list.appendChild(carteContrat(c)));
@@ -313,8 +339,8 @@
   function carteContrat(c) {
     const e = echeance(c);
     const badge = e.etat === "retard" ? `<span class="pl-badge retard">En retard</span>`
-      : e.etat === "bientot" ? `<span class="pl-badge bientot">Bientot</span>`
-        : e.etat === "ok" ? `<span class="pl-badge ok">A jour</span>`
+      : e.etat === "bientot" ? `<span class="pl-badge bientot">Bientôt</span>`
+        : e.etat === "ok" ? `<span class="pl-badge ok">À jour</span>`
           : `<span class="pl-badge inconnu">A planifier</span>`;
     const card = el(`
       <div class="card pl-contrat">
@@ -363,13 +389,13 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(quand)) { toast("Date invalide (format AAAA-MM-JJ)."); return; }
     c.dateDernier = quand;
     await store.saveContrat(c);
-    toast("Entretien enregistre. Prochaine echeance mise a jour.");
+    toast("Entretien enregistré. Prochaine échéance mise à jour.");
     repaint();
   }
 
   function formContrat(c) {
     const edition = !!c;
-    const d = c || { client: "", adresse: "", tel: "", appareilType: "Chaudiere gaz", appareilMarque: "", appareilModele: "", dateDernier: todayISO(), frequenceMois: 12, montant: "", notes: "" };
+    const d = c || { client: "", adresse: "", tel: "", appareilType: "Chaudière gaz", appareilMarque: "", appareilModele: "", dateDernier: todayISO(), frequenceMois: 12, montant: "", notes: "" };
     const opts = TYPES_APPAREIL.map((t) => `<option value="${esc(t)}" ${t === d.appareilType ? "selected" : ""}>${esc(t)}</option>`).join("");
     const sheet = el(`
       <div class="modal">
@@ -562,7 +588,7 @@
         await store.setInfos(nd);
         close();
         repaint();
-        toast("Infos entreprise enregistrees.");
+        toast("Infos entreprise enregistrées.");
       });
       document.getElementById("app").appendChild(sheet);
     });
@@ -602,7 +628,7 @@
             <label>Conseils au client<textarea id="a-cons" rows="2" placeholder="Ex : prevoir le detartrage l'an prochain"></textarea></label>
 
             <div class="sig-bloc">
-              <div class="sig-lab">Signature du technicien ${sigEnregistree ? '<span class="sig-hint">(une signature est enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+              <div class="sig-lab">Signature du technicien ${sigEnregistree ? '<span class="sig-hint">(une signature est enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
               <canvas class="sig-pad" id="sig-tech"></canvas>
               <div class="sig-actions">
                 <button type="button" class="mini" id="sig-tech-clear">Effacer</button>
@@ -740,7 +766,7 @@
       ctx.textAlign = "center"; ctx.fillStyle = "#0f1720"; ctx.font = "700 36px Arial";
       if (draw) ctx.fillText("ATTESTATION D'ENTRETIEN", W / 2, y); y += 46;
       ctx.font = "21px Arial"; ctx.fillStyle = "#55617a";
-      if (draw) ctx.fillText("Chaudiere / appareil de chauffage", W / 2, y); y += 40;
+      if (draw) ctx.fillText("Chaudière / appareil de chauffage", W / 2, y); y += 40;
       ctx.textAlign = "left";
       // Intro
       ctx.fillStyle = "#1a2230"; ctx.font = "22px Arial";
@@ -779,7 +805,7 @@
         ["Marque / modele", data.appareilMM || "-"],
         ["Date de l'entretien", data.dateEntretienFR],
       ]);
-      sectionTitre("Mesures et controles");
+      sectionTitre("Mesures et contrôles");
       tableau([
         ["Teneur en CO", data.co ? data.co + " ppm" : "-"],
         ["Taux de CO2", data.co2 ? data.co2 + " %" : "-"],
@@ -791,8 +817,8 @@
       ctx.fillStyle = "#1a2230"; ctx.font = "21px Arial";
       ["Verification et nettoyage des organes de l'appareil",
         "Controle de l'etancheite et des raccordements",
-        "Controle des dispositifs de securite",
-        "Mesure des rejets de combustion et controle du fonctionnement"].forEach((op) => {
+        "Contrôle des dispositifs de sécurité",
+        "Mesure des rejets de combustion et contrôle du fonctionnement"].forEach((op) => {
           if (draw) { ctx.fillText("•", M + 4, y); ctx.fillText(op, M + 28, y); }
           y += 30;
         });
@@ -904,7 +930,7 @@
               <p class="reg-hint">Pour les travaux dans un logement acheve depuis plus de 2 ans. Le client remplit et signe cette attestation.</p>
               <label>Nom du client<input id="t-client" type="text" placeholder="Nom et prenom"></label>
               <label>Adresse des travaux<input id="t-adresse" type="text" placeholder="Adresse du logement"></label>
-              <label>Nature des travaux<textarea id="t-nature" rows="3" placeholder="Ex : remplacement d'une chaudiere, renovation salle de bain..."></textarea></label>
+              <label>Nature des travaux<textarea id="t-nature" rows="3" placeholder="Ex : remplacement d'une chaudière, rénovation salle de bain..."></textarea></label>
               <label>Taux applique<select id="t-taux">
                 <option value="10">10 % (amelioration, entretien, transformation)</option>
                 <option value="5.5">5,5 % (renovation energetique)</option>
@@ -919,7 +945,7 @@
                 <div class="sig-actions"><button type="button" class="mini" id="sig-tva-client-clear">Effacer</button></div>
               </div>
               <div class="sig-bloc">
-                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
                 <canvas class="sig-pad" id="sig-tva-ent"></canvas>
                 <div class="sig-actions">
                   <button type="button" class="mini" id="sig-tva-ent-clear">Effacer</button>

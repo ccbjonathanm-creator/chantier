@@ -26,6 +26,29 @@
   let modulesCache = [];  // noms des modules payants actifs pour l'entreprise
   let factCache = null;   // { actif, jusqu } de l'abonnement de base
 
+  async function verifierSignatureFichier(fichier) {
+    const contenu = fichier && fichier.contenu;
+    if (!contenu || typeof contenu.arrayBuffer !== "function") {
+      throw new Error("Le contenu du fichier est manquant : import annulé");
+    }
+    const source = typeof contenu.slice === "function" ? contenu.slice(0, 16) : contenu;
+    const octets = new Uint8Array(await source.arrayBuffer());
+    const commencePar = (attendus) => attendus.every((octet, i) => octets[i] === octet);
+    const signatureValide = fichier.typeMime === "application/pdf"
+      ? commencePar([0x25, 0x50, 0x44, 0x46, 0x2d])
+      : fichier.typeMime === "image/jpeg"
+      ? commencePar([0xff, 0xd8, 0xff])
+      : fichier.typeMime === "image/png"
+      ? commencePar([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      : fichier.typeMime === "image/webp"
+      ? commencePar([0x52, 0x49, 0x46, 0x46])
+        && [0x57, 0x45, 0x42, 0x50].every((octet, i) => octets[i + 8] === octet)
+      : false;
+    if (!signatureValide) {
+      throw new Error("Le contenu du fichier ne correspond pas au format annoncé");
+    }
+  }
+
   function client() {
     if (!sb) {
       sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -589,6 +612,14 @@
       boom(error);
       return mapClient(updated);
     },
+    async archiveClient(id) {
+      const { data, error } = await client().from("clients")
+        .update({ archived_at: new Date().toISOString() }).eq("id", id)
+        .is("archived_at", null).select().maybeSingle();
+      boom(error);
+      if (!data) throw new Error("Client introuvable");
+      return mapClient(data);
+    },
 
     // --- Catalogue de prestations et matériaux ---
     async listCatalogCategories() {
@@ -634,6 +665,14 @@
       const { data: updated, error } = await client().from("catalog_items").update(row).eq("id", id).select().single();
       boom(error);
       return mapCatalogItem(updated);
+    },
+    async archiveCatalogItem(id) {
+      const { data, error } = await client().from("catalog_items")
+        .update({ archived_at: new Date().toISOString() }).eq("id", id)
+        .is("archived_at", null).select().maybeSingle();
+      boom(error);
+      if (!data) throw new Error("Article de catalogue introuvable");
+      return mapCatalogItem(data);
     },
     async linkInterventionClient(interventionId, clientId) {
       const { data, error } = await client().from("interventions")
@@ -721,6 +760,14 @@
       boom(error);
       return mapDevis(data);
     },
+    async archiverDevisBrouillon(devisId) {
+      const { data, error } = await client().from("devis")
+        .update({ archive_le: new Date().toISOString() }).eq("id", devisId)
+        .eq("statut", "brouillon").is("archive_le", null).select().maybeSingle();
+      boom(error);
+      if (!data) throw new Error("Seul un devis brouillon peut être archivé");
+      return mapDevis(data);
+    },
 
     // --- Facture (PALIER 2) ---
     // L'émission passe par la fonction PostgreSQL emettre_facture() : c'est
@@ -751,6 +798,7 @@
     },
     async listFactures() {
       const { data, error } = await client().from("factures").select("*")
+        .neq("statut", "annulee")
         .order("created_at", { ascending: false });
       boom(error);
       return (data || []).map(mapFacture);
@@ -967,6 +1015,26 @@
       return out;
     },
     async preparerRelance(cibleType, cibleId, niveau, message) {
+      if (niveau === 2) {
+        const [parametres, premiere] = await Promise.all([
+          this.getParametresRelance(),
+          client().from("relances").select("envoyee_le")
+            .eq("cible_type", cibleType).eq("niveau", 1).eq("statut", "envoyee")
+            .eq(cibleType === "devis" ? "devis_id" : "facture_id", cibleId).maybeSingle(),
+        ]);
+        boom(premiere.error);
+        if (!premiere.data || !premiere.data.envoyee_le) {
+          throw new Error("Deuxième relance impossible : la première n'a pas été envoyée");
+        }
+        const delaiRequis = cibleType === "devis"
+          ? Number(parametres.delaiDevis2)
+          : Number(parametres.delaiFacture2);
+        const ecoules = Math.floor((Date.now() - new Date(premiere.data.envoyee_le).getTime()) / 86400000);
+        if (!Number.isFinite(ecoules) || ecoules < delaiRequis) {
+          const restant = Math.max(1, delaiRequis - Math.max(0, ecoules || 0));
+          throw new Error("Deuxième relance disponible dans " + restant + " jour" + (restant > 1 ? "s" : ""));
+        }
+      }
       const { data, error } = await client().from("relances").insert({
         entreprise_id: entrepriseId,
         cible_type: cibleType,
@@ -1219,6 +1287,7 @@
       if (taille <= 0) throw new Error("Fichier vide");
       if (taille > 20971520) throw new Error("Fichier trop lourd : 20 Mo au maximum");
       if (!fichier.contenu || typeof fichier.contenu.arrayBuffer !== "function") throw new Error("Le contenu du fichier est manquant : import annulé");
+      await verifierSignatureFichier(fichier);
       const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID()
         : "00000000-0000-4000-8000-" + Date.now().toString().padStart(12, "0").slice(-12);
       const nomSur = nom.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180);

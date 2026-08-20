@@ -14,6 +14,29 @@
   const DOCUMENTS_DB = "clicchantier_documents_v1";
   const DOCUMENTS_STORE = "justificatifs";
 
+  async function verifierSignatureFichier(fichier) {
+    const contenu = fichier && fichier.contenu;
+    if (!contenu || typeof contenu.arrayBuffer !== "function") {
+      throw new Error("Le contenu du fichier est manquant : import annulé");
+    }
+    const source = typeof contenu.slice === "function" ? contenu.slice(0, 16) : contenu;
+    const octets = new Uint8Array(await source.arrayBuffer());
+    const commencePar = (attendus) => attendus.every((octet, i) => octets[i] === octet);
+    const signatureValide = fichier.typeMime === "application/pdf"
+      ? commencePar([0x25, 0x50, 0x44, 0x46, 0x2d])
+      : fichier.typeMime === "image/jpeg"
+      ? commencePar([0xff, 0xd8, 0xff])
+      : fichier.typeMime === "image/png"
+      ? commencePar([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      : fichier.typeMime === "image/webp"
+      ? commencePar([0x52, 0x49, 0x46, 0x46])
+        && [0x57, 0x45, 0x42, 0x50].every((octet, i) => octets[i + 8] === octet)
+      : false;
+    if (!signatureValide) {
+      throw new Error("Le contenu du fichier ne correspond pas au format annoncé");
+    }
+  }
+
   function baseDocuments() {
     return new Promise((resolve, reject) => {
       if (typeof indexedDB === "undefined") {
@@ -105,17 +128,17 @@
       interventions: [
         {
           id: uid(), date: j, dateFin: addDays(j, 4), employeId: e1, statut: "a_faire", heure: "08:00",
-          client: "M. et Mme Roux", adresse: "24 rue de la Republique, Le Creusot", tel: "0611223344",
+          client: "M. et Mme Roux", adresse: "24 rue de la République, Le Creusot", tel: "0611223344",
           description: "Rénovation salle de bain complète : dépose de l'ancienne, plomberie, pose d'une douche à l'italienne, meuble et robinetterie.",
         },
         {
           id: uid(), date: j, dateFin: j, employeId: e1, statut: "a_faire", heure: "16:00",
           client: "M. Petit", adresse: "5 av. de la Gare, Montceau", tel: "0655667788",
-          description: "Chasse d'eau qui coule en continu. Remplacer le mecanisme.",
+          description: "Chasse d'eau qui coule en continu. Remplacer le mécanisme.",
         },
         {
           id: uid(), date: j, dateFin: j, employeId: e2, statut: "a_faire", heure: "09:00",
-          client: "Boulangerie du Centre", adresse: "3 pl. du Marche, Le Creusot", tel: "0385551122",
+          client: "Boulangerie du Centre", adresse: "3 pl. du Marché, Le Creusot", tel: "0385551122",
           description: "Chauffe-eau en panne, pas d'eau chaude. Diagnostic.",
         },
         // Quelques chantiers repartis sur le mois et l'annee (pour les vues Mois / Annee)
@@ -126,8 +149,8 @@
         },
         {
           id: uid(), date: addDays(j, 6), dateFin: addDays(j, 9), employeId: e2, statut: "a_faire", heure: "08:00",
-          client: "Copropriete Les Tilleuls", adresse: "15 bd Henri Paul Schneider, Le Creusot", tel: "0385009911",
-          description: "Refection colonne d'eau, remplacement de vannes sur 4 etages.",
+          client: "Copropriété Les Tilleuls", adresse: "15 bd Henri Paul Schneider, Le Creusot", tel: "0385009911",
+          description: "Réfection colonne d'eau, remplacement de vannes sur 4 étages.",
         },
         {
           id: uid(), date: addDays(j, 8), dateFin: addDays(j, 8), employeId: e1, statut: "a_faire", heure: "14:00",
@@ -137,17 +160,17 @@
         {
           id: uid(), date: addDays(j, 14), dateFin: addDays(j, 14), employeId: e1, statut: "a_faire", heure: "09:30",
           client: "Garage Central", adresse: "40 route de Chalon, Le Creusot", tel: "0385447788",
-          description: "Fuite reseau air comprime, controle raccords.",
+          description: "Fuite réseau air comprimé, contrôle raccords.",
         },
         {
           id: uid(), date: addDays(j, 21), dateFin: addDays(j, 25), employeId: e1, statut: "a_faire", heure: "08:00",
-          client: "Restaurant Le Gourmet", adresse: "12 rue Marechal Foch, Autun", tel: "0385551199",
+          client: "Restaurant Le Gourmet", adresse: "12 rue Maréchal Foch, Autun", tel: "0385551199",
           description: "Rénovation complète de la cuisine : plomberie, évacuations, adoucisseur.",
         },
         {
           id: uid(), date: addDays(j, 40), dateFin: addDays(j, 40), employeId: e2, statut: "a_faire", heure: "10:00",
           client: "M. Fontaine", adresse: "6 chemin du Bois, Le Breuil", tel: "0699887766",
-          description: "Entretien annuel chaudiere gaz.",
+          description: "Entretien annuel chaudière gaz.",
         },
       ],
       pointages: [], // { id, interventionId, employeId, debut, fin }
@@ -232,6 +255,18 @@
       db.parametresFacturation.coutHoraireInterne = 28;
       db.parametresFacturation.tvaMainOeuvre = 10;
     }
+    const correctionsDemo = [
+      ["Republique", "République"], ["Marche", "Marché"], ["mecanisme", "mécanisme"],
+      ["Copropriete", "Copropriété"], ["Refection", "Réfection"], ["etages", "étages"],
+      ["reseau", "réseau"], ["comprime", "comprimé"], ["controle", "contrôle"],
+      ["Marechal", "Maréchal"], ["chaudiere", "chaudière"],
+    ];
+    (db.interventions || []).forEach((i) => {
+      ["client", "adresse", "description"].forEach((champ) => {
+        if (typeof i[champ] !== "string") return;
+        correctionsDemo.forEach(([avant, apres]) => { i[champ] = i[champ].split(avant).join(apres); });
+      });
+    });
     (db.interventions || []).forEach((i) => {
       if (!("devisId" in i)) i.devisId = null;
     });
@@ -353,6 +388,15 @@
 
   function save(db) {
     localStorage.setItem(STORE_KEY, JSON.stringify(db));
+  }
+
+  function exigerPatronDemo() {
+    const id = localStorage.getItem(SESSION_KEY);
+    if (!id) return; // opérations système d'amorçage, avant le choix d'un profil
+    const profil = load().employes.find((e) => e.id === id);
+    if (!profil || profil.role !== "patron") {
+      throw new Error("Action réservée au patron");
+    }
   }
 
   // Simule un petit delai reseau pour que l'appli soit ecrite comme si c'etait
@@ -562,16 +606,17 @@
     // --- Clients ---
     async listClients() {
       const db = load();
-      const out = db.clients.slice().sort((a, b) => a.displayName.localeCompare(b.displayName, "fr"));
+      const out = db.clients.filter((c) => !c.archivedAt)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, "fr"));
       return delay(out);
     },
     async getClient(id) {
       const db = load();
-      return delay(db.clients.find((c) => c.id === id) || null);
+      return delay(db.clients.find((c) => c.id === id && !c.archivedAt) || null);
     },
     async createClient(data) {
       const db = load();
-      const row = Object.assign({ id: uid() }, data);
+      const row = Object.assign({ id: uid(), archivedAt: null }, data);
       db.clients.push(row);
       save(db);
       return delay(row);
@@ -581,6 +626,18 @@
       const row = db.clients.find((c) => c.id === id);
       if (!row) throw new Error("Client introuvable");
       Object.assign(row, patch);
+      save(db);
+      return delay(row);
+    },
+    async archiveClient(id) {
+      const db = load();
+      const row = db.clients.find((c) => c.id === id && !c.archivedAt);
+      if (!row) throw new Error("Client introuvable");
+      const utilise = db.interventions.some((i) => i.clientId === id)
+        || db.devis.some((d) => d.clientId === id)
+        || db.factures.some((f) => f.clientId === id);
+      if (utilise) throw new Error("Ce client est utilisé par un chantier, un devis ou une facture et ne peut pas être archivé");
+      row.archivedAt = new Date().toISOString();
       save(db);
       return delay(row);
     },
@@ -604,15 +661,16 @@
     },
     async listCatalogItems() {
       const db = load();
-      return delay(db.catalogItems.slice().sort((a, b) => a.label.localeCompare(b.label, "fr")));
+      return delay(db.catalogItems.filter((i) => !i.archivedAt)
+        .sort((a, b) => a.label.localeCompare(b.label, "fr")));
     },
     async getCatalogItem(id) {
       const db = load();
-      return delay(db.catalogItems.find((i) => i.id === id) || null);
+      return delay(db.catalogItems.find((i) => i.id === id && !i.archivedAt) || null);
     },
     async createCatalogItem(data) {
       const db = load();
-      const row = Object.assign({ id: uid() }, data);
+      const row = Object.assign({ id: uid(), archivedAt: null }, data);
       db.catalogItems.push(row);
       save(db);
       return delay(row);
@@ -622,6 +680,19 @@
       const row = db.catalogItems.find((i) => i.id === id);
       if (!row) throw new Error("Article de catalogue introuvable");
       Object.assign(row, patch);
+      save(db);
+      return delay(row);
+    },
+    async archiveCatalogItem(id) {
+      const db = load();
+      const row = db.catalogItems.find((i) => i.id === id && !i.archivedAt);
+      if (!row) throw new Error("Article de catalogue introuvable");
+      const utilise = db.devisLignes.some((l) => l.catalogItemId === id)
+        || db.factureLignes.some((l) => l.catalogItemId === id)
+        || db.stockMouvements.some((m) => m.catalogItemId === id)
+        || db.facturesFournisseursLignes.some((l) => l.catalogItemId === id);
+      if (utilise) throw new Error("Cet article est utilisé dans un document ou un mouvement de stock et ne peut pas être archivé");
+      row.archivedAt = new Date().toISOString();
       save(db);
       return delay(row);
     },
@@ -640,7 +711,8 @@
     // est passé par le statut "valide", posé par un clic explicite.
     async listDevis() {
       const db = load();
-      const out = db.devis.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      const out = db.devis.filter((d) => !d.archiveLe)
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return delay(out);
     },
     async getDevis(id) {
@@ -747,6 +819,18 @@
       save(db);
       return delay(d);
     },
+    async archiverDevisBrouillon(devisId) {
+      const db = load();
+      const d = db.devis.find((x) => x.id === devisId && !x.archiveLe);
+      if (!d) throw new Error("Devis introuvable");
+      if (d.statut !== "brouillon") throw new Error("Seul un devis brouillon peut être archivé");
+      if (db.factures.some((f) => f.devisId === devisId && f.statut !== "annulee")) {
+        throw new Error("Ce devis est déjà utilisé par une facture");
+      }
+      d.archiveLe = new Date().toISOString();
+      save(db);
+      return delay(d);
+    },
 
     // --- Facture (PALIER 2) ---
     async getParametresFacturation() {
@@ -768,7 +852,8 @@
     },
     async listFactures() {
       const db = load();
-      return delay(db.factures.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+      return delay(db.factures.filter((f) => f.statut !== "annulee")
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
     },
     async getFacture(id) {
       const db = load();
@@ -1174,6 +1259,17 @@
       if (niveau === 2 && !rs.some((r) => r.niveau === 1 && r.statut === "envoyee")) {
         throw new Error("Deuxième relance impossible : la première n'a pas été envoyée");
       }
+      if (niveau === 2) {
+        const premiere = rs.find((r) => r.niveau === 1 && r.statut === "envoyee");
+        const delaiRequis = cibleType === "devis"
+          ? Number(db.parametresRelance.delaiDevis2)
+          : Number(db.parametresRelance.delaiFacture2);
+        const ecoules = joursEcoules(premiere.envoyeeLe, new Date());
+        if (ecoules === null || ecoules < delaiRequis) {
+          const restant = Math.max(1, delaiRequis - Math.max(0, ecoules || 0));
+          throw new Error("Deuxième relance disponible dans " + restant + " jour" + (restant > 1 ? "s" : ""));
+        }
+      }
 
       const row = {
         id: uid(), cibleType,
@@ -1223,6 +1319,7 @@
       if (!fichier.contenu || typeof fichier.contenu.arrayBuffer !== "function") {
         throw new Error("Le contenu du fichier est manquant : import annulé");
       }
+      await verifierSignatureFichier(fichier);
 
       const row = {
         id: uid(), nomFichier: nom, typeMime: fichier.typeMime, tailleOctets: taille,
@@ -1877,6 +1974,29 @@
       return (db.entreprise && db.entreprise.metier) || null;
     },
   };
+
+  // En démonstration, l'interface masque déjà les commandes patron. Cette
+  // seconde barrière évite qu'un employé les appelle directement via l'API.
+  [
+    "createIntervention", "updateIntervention", "deleteIntervention",
+    "createClient", "updateClient", "archiveClient", "createCatalogCategory",
+    "createCatalogItem", "updateCatalogItem", "archiveCatalogItem", "linkInterventionClient",
+    "createDevis", "addDevisLigne", "deleteDevisLigne", "changerStatutDevis", "archiverDevisBrouillon",
+    "saveParametresFacturation", "creerFactureDepuisDevis", "addFactureLigne",
+    "deleteFactureLigne", "changerStatutFacture", "emettreFacture", "creerAvoir",
+    "enregistrerPaiement", "saveParametresRelance", "preparerRelance",
+    "marquerRelanceEnvoyee", "annulerRelance", "createEmplacement",
+    "annulerMouvementStock", "rattacherChantierAuDevis", "creerFactureDepuisReel",
+    "importerFactureFournisseur", "enregistrerExtraction", "validerFactureFournisseur",
+    "rejeterFactureFournisseur", "resetDemo",
+  ].forEach((nom) => {
+    const original = DemoBackend[nom];
+    if (typeof original !== "function") return;
+    DemoBackend[nom] = function () {
+      exigerPatronDemo();
+      return original.apply(this, arguments);
+    };
+  });
 
   window.Chantier = window.Chantier || {};
   window.Chantier.backends = window.Chantier.backends || {};

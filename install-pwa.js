@@ -90,6 +90,7 @@
 
   var DISMISS_KEY = 'pwa_install_dismissed_until_v1';
   var deferredPrompt = null;
+  var explorationReady = !!root.CLICCHANTIER_EXPLORE;
 
   function isStandalone() {
     return (root.matchMedia && root.matchMedia('(display-mode: standalone)').matches) ||
@@ -135,7 +136,7 @@
       '.' + PREFIX + '-btn:active{filter:brightness(.92)}' +
       '.' + PREFIX + '-steps{margin:12px 0 0;padding:0;list-style:none;font-size:13.5px;color:#dfe3ec}' +
       '.' + PREFIX + '-steps li{display:flex;align-items:center;gap:8px;padding:5px 0}' +
-      '.' + PREFIX + '-num{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}' +
+      '.' + PREFIX + '-num{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}' +
       '.' + PREFIX + '-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.1);border-radius:7px;padding:2px 7px;font-weight:600}' +
       '.' + PREFIX + '-chip svg{width:15px;height:15px}' +
       '@media (prefers-color-scheme:light){.' + PREFIX + '-card{background:#ffffff;color:#12151c;border-color:rgba(0,0,0,.1);box-shadow:0 18px 50px rgba(0,0,0,.18)}.' + PREFIX + '-sub{color:#4a5162}.' + PREFIX + '-steps{color:#2a2f3a}.' + PREFIX + '-num,.' + PREFIX + '-chip{background:rgba(0,0,0,.07)}.' + PREFIX + '-close{color:#8b93a5}}';
@@ -194,8 +195,8 @@
   function showInstallButton() {
     mount({
       head: head('Installer ' + CFG.appName, dire(
-        "Ajoute l'application a ton ecran, elle s'ouvre en plein ecran, meme hors-ligne.",
-        "Ajoutez l'application a votre ecran, elle s'ouvre en plein ecran, meme hors-ligne."
+        "Ajoute l'application à ton écran, elle s'ouvre en plein écran, même hors-ligne.",
+        "Ajoutez l'application à votre écran, elle s'ouvre en plein écran, même hors-ligne."
       )),
       body: '<button class="' + PREFIX + '-btn" type="button">Installer l\'application</button>',
       onMount: function (wrap) {
@@ -213,10 +214,10 @@
 
   function showIosSafari() {
     mount({
-      head: head('Ajouter ' + CFG.appName + ' a l\'ecran d\'accueil', 'Deux etapes dans Safari :'),
+      head: head('Ajouter ' + CFG.appName + ' à l\'écran d\'accueil', 'Deux étapes dans Safari :'),
       body: '<ol class="' + PREFIX + '-steps">' +
-        '<li><span class="' + PREFIX + '-num">1</span> ' + dire('Appuie', 'Appuyez') + ' sur <span class="' + PREFIX + '-chip">' + ICON.share + 'Partager</span> en bas de l\'ecran</li>' +
-        '<li><span class="' + PREFIX + '-num">2</span> ' + dire('Choisis', 'Choisissez') + ' <span class="' + PREFIX + '-chip">' + ICON.plus + 'Sur l\'ecran d\'accueil</span></li>' +
+        '<li><span class="' + PREFIX + '-num">1</span> ' + dire('Appuie', 'Appuyez') + ' sur <span class="' + PREFIX + '-chip">' + ICON.share + 'Partager</span> en bas de l\'écran</li>' +
+        '<li><span class="' + PREFIX + '-num">2</span> ' + dire('Choisis', 'Choisissez') + ' <span class="' + PREFIX + '-chip">' + ICON.plus + 'Sur l\'écran d\'accueil</span></li>' +
         '</ol>'
     }, ICON.share);
   }
@@ -230,7 +231,7 @@
       body: '<ol class="' + PREFIX + '-steps">' +
         '<li><span class="' + PREFIX + '-num">1</span> ' + dire('Touche', 'Touchez') + ' <span class="' + PREFIX + '-chip">' + ICON.menu + '</span> ou l\'icone de partage</li>' +
         '<li><span class="' + PREFIX + '-num">2</span> ' + dire('Choisis', 'Choisissez') + ' <span class="' + PREFIX + '-chip">' + ICON.safari + 'Ouvrir dans Safari</span></li>' +
-        '<li><span class="' + PREFIX + '-num">3</span> Puis Partager &rarr; Sur l\'ecran d\'accueil</li>' +
+        '<li><span class="' + PREFIX + '-num">3</span> Puis Partager &rarr; Sur l\'écran d\'accueil</li>' +
         '</ol>'
     }, ICON.safari);
   }
@@ -238,8 +239,8 @@
   function showAndroidInApp() {
     mount({
       head: head(dire('Ouvre ', 'Ouvrez ') + CFG.appName + ' dans Chrome', dire(
-        "Pour installer l'application, ouvre cette page dans Chrome (menu ⋮ en haut a droite → Ouvrir dans le navigateur), puis Installer.",
-        "Pour installer l'application, ouvrez cette page dans Chrome (menu ⋮ en haut a droite → Ouvrir dans le navigateur), puis Installer."
+        "Pour installer l'application, ouvre cette page dans Chrome (menu ⋮ en haut à droite → Ouvrir dans le navigateur), puis Installer.",
+        "Pour installer l'application, ouvrez cette page dans Chrome (menu ⋮ en haut à droite → Ouvrir dans le navigateur), puis Installer."
       ))
     }, ICON.menu);
   }
@@ -258,6 +259,10 @@
       }
     }
 
+    // Ne pas interrompre le premier contact. L'application déclenche cet
+    // état après le choix d'un profil et le premier écran réellement exploré.
+    if (!explorationReady) return;
+
     if (isStandalone()) return;        // deja installe
     if (dismissedRecently()) return;   // ferme recemment
 
@@ -272,7 +277,8 @@
       case 'ios-inapp': return showIosOpenInSafari(dire('Ouvre ', 'Ouvrez ') + CFG.appName + ' dans Safari');
       case 'ios-otherbrowser': return showIosOpenInSafari(dire('Passe', 'Passez') + ' sur Safari pour installer');
       case 'android-inapp': return showAndroidInApp();
-      // android-installable / desktop-installable : geres par l'evenement beforeinstallprompt.
+      case 'android-installable':
+      case 'desktop-installable': return showInstallButton();
       // android-generic / desktop : rien (pas d'install fiable a proposer).
     }
   }
@@ -283,7 +289,12 @@
     deferredPrompt = e;
     if (debugState()) return;
     if (isStandalone() || dismissedRecently()) return;
-    showInstallButton();
+    if (explorationReady) showInstallButton();
+  });
+
+  root.addEventListener('clicchantier:explore', function () {
+    explorationReady = true;
+    try { decide(); } catch (e) {}
   });
 
   root.addEventListener('appinstalled', function () {

@@ -68,7 +68,7 @@
     var jour = j + " jour" + (j > 1 ? "s" : "");
     var urgent = j <= 3 ? " abo-urgent" : "";
     var txt;
-    if (j === 1) txt = "Dernier jour d'essai. Choisissez une formule pour ne pas perdre l'acces demain.";
+    if (j === 1) txt = "Dernier jour d'essai. Choisissez une formule pour ne pas perdre l'accès demain.";
     else if (j <= 3) txt = "Plus que " + jour + " d'essai. Pensez a choisir votre abonnement.";
     else if (j <= 7) txt = "Il reste " + jour + " d'essai.";
     else txt = "Periode d'essai : " + jour + " restant" + (j > 1 ? "s" : "") + ".";
@@ -98,7 +98,7 @@
     api.ouvrirPortail().then(function (url) {
       window.location.href = url;
     }).catch(function (e) {
-      if (btn) { btn.disabled = false; btn.textContent = "Gerer / annuler mon abonnement"; }
+      if (btn) { btn.disabled = false; btn.textContent = "Gérer / annuler mon abonnement"; }
       if (msgEl) msgEl.textContent = "Erreur : " + (e && e.message ? e.message : e);
     });
   }
@@ -125,17 +125,17 @@
   function ecranBloque(role, fact) {
     var eff = (fact && (fact.statutEffectif || fact.statut)) || "";
     var titre, sous;
-    if (eff === "trial_expired") { titre = "Votre periode d'essai est terminee"; sous = "Choisissez une formule pour continuer a utiliser ClicChantier. Vos donnees sont conservees."; }
-    else if (eff === "canceled") { titre = "Abonnement resilie"; sous = "Reactivez un abonnement pour retrouver l'acces. Vos donnees sont conservees."; }
-    else if (eff === "unpaid") { titre = "Abonnement impaye"; sous = "Apres plusieurs tentatives, le paiement n'a pas abouti. Regularisez pour reactiver l'acces."; }
-    else { titre = "Paiement en echec"; sous = "Un paiement n'a pas abouti. Mettez a jour votre moyen de paiement pour reactiver l'acces."; }
+    if (eff === "trial_expired") { titre = "Votre période d'essai est terminée"; sous = "Choisissez une formule pour continuer à utiliser ClicChantier. Vos données sont conservées."; }
+    else if (eff === "canceled") { titre = "Abonnement résilié"; sous = "Réactivez un abonnement pour retrouver l'accès. Vos données sont conservées."; }
+    else if (eff === "unpaid") { titre = "Abonnement impayé"; sous = "Après plusieurs tentatives, le paiement n'a pas abouti. Régularisez pour réactiver l'accès."; }
+    else { titre = "Paiement en échec"; sous = "Un paiement n'a pas abouti. Mettez à jour votre moyen de paiement pour réactiver l'accès."; }
 
     if (role !== "patron") {
       return el(
         '<div class="abo-gate">' +
           '<div class="abo-gate-box">' +
             '<h1>' + esc(titre) + "</h1>" +
-            '<p>L\'abonnement de votre entreprise n\'est plus actif. Prevenez votre responsable (patron du compte) pour le reactiver.</p>' +
+            '<p>L\'abonnement de votre entreprise n\'est plus actif. Prévenez votre responsable (patron du compte) pour le réactiver.</p>' +
           "</div>" +
         "</div>"
       );
@@ -147,7 +147,7 @@
           '<h1>' + esc(titre) + "</h1>" +
           '<p>' + esc(sous) + "</p>" +
           '<div class="abo-cartes">' + cartesFormules(fact) + "</div>" +
-          (fact && fact.aClientStripe ? '<button class="abo-portail" id="abo-portail">Gerer / annuler mon abonnement</button>' : "") +
+          (fact && fact.aClientStripe ? '<button class="abo-portail" id="abo-portail">Gérer / annuler mon abonnement</button>' : "") +
           '<p class="abo-msg" id="abo-msg"></p>' +
           '<button class="abo-sortie" id="abo-signout">Se deconnecter</button>' +
         "</div>" +
@@ -177,21 +177,21 @@
     else if (eff === "active") {
       etat = '<span class="mod-badge ok">Actif</span>';
       var f = CATALOGUE.filter(function (x) { return x.code === fact.formule; })[0];
-      detail = (f ? "Formule " + esc(f.libelle) + ". " : "") + (fact.periodeFin ? "Prochaine echeance : " + esc(fact.periodeFin) + "." : "");
+      detail = (f ? "Formule " + esc(f.libelle) + ". " : "") + (fact.periodeFin ? "Prochaine échéance : " + esc(fact.periodeFin) + "." : "");
     } else if (eff === "trialing") {
       var j = joursEssai(fact);
       etat = '<span class="mod-badge ok">Essai</span>';
       detail = (j != null && j > 0) ? (j + " jour" + (j > 1 ? "s" : "") + " restant" + (j > 1 ? "s" : "") + ".") : "";
     } else if (eff === "trial_expired") {
-      etat = '<span class="mod-badge lock">Essai termine</span>'; detail = "Choisissez une formule pour reactiver l'acces.";
+      etat = '<span class="mod-badge lock">Essai terminé</span>'; detail = "Choisissez une formule pour réactiver l'accès.";
     } else if (eff === "past_due") {
       etat = '<span class="mod-badge lock">Paiement en retard</span>'; detail = "Un paiement n'a pas abouti.";
     } else if (eff === "unpaid") {
-      etat = '<span class="mod-badge lock">Impaye</span>'; detail = "Regularisez pour reactiver l'acces.";
+      etat = '<span class="mod-badge lock">Impayé</span>'; detail = "Régularisez pour réactiver l'accès.";
     } else if (eff === "canceled") {
       var enGrace = fact.periodeFin && new Date(fact.periodeFin).getTime() >= Date.now();
       etat = '<span class="mod-badge ' + (enGrace ? "ok" : "lock") + '">Resilie</span>';
-      detail = enGrace ? ("Acces conserve jusqu'au " + esc(fmtDateCourt(fact.periodeFin)) + ".") : "Reactivez un abonnement pour retrouver l'acces.";
+      detail = enGrace ? ("Accès conservé jusqu'au " + esc(fmtDateCourt(fact.periodeFin)) + ".") : "Réactivez un abonnement pour retrouver l'accès.";
     } else { etat = esc(eff || ""); }
 
     var actions = "";
@@ -199,7 +199,7 @@
       actions = '<div class="abo-cartes reg">' + cartesFormules(fact) + "</div>";
     }
     if (fact && fact.aClientStripe) {
-      actions += '<button class="abo-portail" id="abo-portail-reg">Gerer / annuler mon abonnement</button>';
+      actions += '<button class="abo-portail" id="abo-portail-reg">Gérer / annuler mon abonnement</button>';
     }
 
     return (

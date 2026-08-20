@@ -204,7 +204,7 @@
   async function sectionAccueil() {
     const infos = await store.infos();
     const cont = el(`<div class="page pl-page"></div>`);
-    cont.appendChild(enteteSection("Pack Peintre", "Vos outils metier", undefined));
+    cont.appendChild(enteteSection("Pack Peintre", "Vos outils métier", undefined));
 
     const grid = el(`<div class="pl-cards"></div>`);
     grid.appendChild(carteNav(I.calc, "Calculateurs de metre", "Placo, enduit, peinture, tapisserie", () => go("calc")));
@@ -812,7 +812,7 @@
         await store.setInfos(nd);
         close();
         repaint();
-        toast("Infos entreprise enregistrees.");
+        toast("Infos entreprise enregistrées.");
       });
       document.getElementById("app").appendChild(sheet);
     });
@@ -862,7 +862,7 @@
                 <div class="sig-actions"><button type="button" class="mini" id="sig-k-client-clear">Effacer</button></div>
               </div>
               <div class="sig-bloc">
-                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
                 <canvas class="sig-pad" id="sig-k-ent"></canvas>
                 <div class="sig-actions">
                   <button type="button" class="mini" id="sig-k-ent-clear">Effacer</button>
@@ -943,7 +943,7 @@
                 <div class="sig-actions"><button type="button" class="mini" id="sig-tva-client-clear">Effacer</button></div>
               </div>
               <div class="sig-bloc">
-                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistree : laissez vide pour la reutiliser)</span>' : ""}</div>
+                <div class="sig-lab">Signature de l'entreprise ${sigEnregistree ? '<span class="sig-hint">(signature enregistrée : laissez vide pour la réutiliser)</span>' : ""}</div>
                 <canvas class="sig-pad" id="sig-tva-ent"></canvas>
                 <div class="sig-actions">
                   <button type="button" class="mini" id="sig-tva-ent-clear">Effacer</button>

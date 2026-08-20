@@ -100,7 +100,7 @@ test("une incompatibilité du schéma cloud remonte un message destiné à l'art
 test("le routeur possède un écran de repli global et intercepte les rejets asynchrones", () => {
   const source = fs.readFileSync(path.join(root, "js", "app.js"), "utf8");
   assert.match(source, /function afficherErreurGlobale\(error\)/);
-  assert.match(source, /return await renderInterne\(\)/);
+  assert.match(source, /const resultat = await renderInterne\(\)/);
   assert.match(source, /if \(!state\.me\) return renderLogin\(\)/);
   assert.match(source, /Impossible de charger vos données/);
   assert.match(source, /if \(erreurDemarrage\) \{[\s\S]*afficherErreurGlobale\(erreurDemarrage\)/);

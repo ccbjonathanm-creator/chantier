@@ -1,7 +1,7 @@
 {
   "name": "ClicChantier - Gestion de chantier pour artisans",
   "short_name": "ClicChantier",
-  "description": "Le planning des tournees et les heures de votre equipe, sur le terrain.",
+  "description": "Le planning des tournées et les heures de votre équipe, sur le terrain.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
