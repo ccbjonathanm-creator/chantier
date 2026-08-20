@@ -526,9 +526,14 @@
     app.appendChild(root);
   }
 
-  // ---------- Reglages : cle IA (Groq) ----------
-  function sheetReglages() {
+  // ---------- Réglages : facturation, taux et clé IA ----------
+  async function sheetReglages() {
     const ia = window.Chantier.ia;
+    let params;
+    try { params = await api.getParametresFacturation(); }
+    catch (e) { alert("Impossible de charger les paramètres de facturation : " + e.message); return; }
+    params = params || {};
+    const vendeur = params.vendeurSnapshot || {};
     const sheet = el(`
       <div class="modal">
         <div class="sheet">
@@ -536,15 +541,35 @@
           <div class="sheet-body">
             <div class="reg-bloc">
               <div class="reg-titre">${ICON.spark} Assistant vocal IA</div>
-              <p class="reg-txt">Pour transformer les notes vocales de chantier en comptes-rendus propres, collez votre clé Groq (gratuite). Elle reste sur cet appareil, jamais envoyée ailleurs.</p>
+              <p class="reg-txt">Pour transformer les notes vocales de chantier en comptes-rendus propres, collez votre clé Groq personnelle. Elle reste sur cet appareil, jamais enregistrée dans ClicChantier.</p>
               <label>Clé Groq<input id="f-key" type="password" placeholder="gsk_..." value="${esc(ia.getKey())}"></label>
-              <p class="reg-hint">Clé gratuite sur console.groq.com (rubrique API Keys). Sans clé, la dictée marche quand même, mais sans reformulation IA.</p>
+              <p class="reg-hint">La création et l'usage de cette clé dépendent des conditions de Groq. Sans clé, la dictée et la structuration locale restent disponibles.</p>
             </div>
+            ${state.me && state.me.role === "patron" ? `<div class="reg-bloc" id="reg-facturation">
+              <div class="reg-titre">Facturation et rentabilité</div>
+              <p class="reg-txt">Ces informations apparaissent sur vos documents et alimentent le calcul de rentabilité.</p>
+              <label>Nom ou raison sociale<input id="f-vendeur-nom" required value="${esc(vendeur.nom || "")}"></label>
+              <label>SIRET<input id="f-vendeur-siret" required inputmode="numeric" value="${esc(vendeur.siret || "")}"></label>
+              <label>Adresse<input id="f-vendeur-adresse" required value="${esc(vendeur.adresse || "")}"></label>
+              <div class="socle-form-grid">
+                <label>Code postal<input id="f-vendeur-cp" required inputmode="numeric" value="${esc(vendeur.codePostal || "")}"></label>
+                <label>Ville<input id="f-vendeur-ville" required value="${esc(vendeur.ville || "")}"></label>
+              </div>
+              <label>Conditions de paiement<textarea id="f-conditions" rows="2" required>${esc(params.conditionsPaiement || "")}</textarea></label>
+              <label>Pénalités de retard<textarea id="f-penalites" rows="2" required>${esc(params.penalitesRetard || "")}</textarea></label>
+              <label>Mention de TVA<textarea id="f-mention-tva" rows="2">${esc(params.mentionTva || "")}</textarea></label>
+              <div class="socle-form-grid">
+                <label>Taux horaire vendu HT<input id="f-taux-vente" type="number" min="0" step="0.01" required value="${Number(params.tauxHoraireVente == null ? 45 : params.tauxHoraireVente)}"></label>
+                <label>Coût horaire interne<input id="f-cout-interne" type="number" min="0" step="0.01" required value="${Number(params.coutHoraireInterne == null ? 28 : params.coutHoraireInterne)}"></label>
+              </div>
+              <label>TVA de la main-d'œuvre<select id="f-tva-mo">${[0, 5.5, 10, 20].map((t) => `<option value="${t}" ${Number(params.tvaMainOeuvre == null ? 10 : params.tvaMainOeuvre) === t ? "selected" : ""}>${String(t).replace(".", ",")} %</option>`).join("")}</select></label>
+            </div>
+            ` : ""}
             <div class="reg-bloc" id="reg-cloud"></div>
             <div class="reg-bloc" id="reg-modules"></div>
           </div>
           <div class="sheet-foot">
-            <button class="danger" id="clear">Effacer</button>
+            <button class="danger" id="clear">Effacer la clé IA</button>
             <button class="primary" id="save">Enregistrer</button>
           </div>
         </div>
@@ -554,8 +579,38 @@
     const close = () => { sheet.remove(); if (modulesChanged) render(); };
     sheet.querySelector("#close").addEventListener("click", close);
     sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
-    sheet.querySelector("#save").addEventListener("click", () => { ia.setKey(sheet.querySelector("#f-key").value); close(); });
-    sheet.querySelector("#clear").addEventListener("click", () => { ia.setKey(""); close(); });
+    sheet.querySelector("#save").addEventListener("click", async () => {
+      const bouton = sheet.querySelector("#save");
+      bouton.disabled = true;
+      try {
+        if (state.me && state.me.role === "patron") {
+          const requis = ["#f-vendeur-nom", "#f-vendeur-siret", "#f-vendeur-adresse", "#f-vendeur-cp", "#f-vendeur-ville", "#f-conditions", "#f-penalites"];
+          const vide = requis.map((s) => sheet.querySelector(s)).find((champ) => !champ.value.trim());
+          if (vide) { vide.focus(); throw new Error("Complétez tous les champs obligatoires de facturation"); }
+          await api.saveParametresFacturation({
+            vendeurSnapshot: {
+              nom: sheet.querySelector("#f-vendeur-nom").value.trim(),
+              siret: sheet.querySelector("#f-vendeur-siret").value.trim(),
+              adresse: sheet.querySelector("#f-vendeur-adresse").value.trim(),
+              codePostal: sheet.querySelector("#f-vendeur-cp").value.trim(),
+              ville: sheet.querySelector("#f-vendeur-ville").value.trim(),
+            },
+            conditionsPaiement: sheet.querySelector("#f-conditions").value.trim(),
+            penalitesRetard: sheet.querySelector("#f-penalites").value.trim(),
+            mentionTva: sheet.querySelector("#f-mention-tva").value.trim(),
+            tauxHoraireVente: Number(sheet.querySelector("#f-taux-vente").value),
+            coutHoraireInterne: Number(sheet.querySelector("#f-cout-interne").value),
+            tvaMainOeuvre: Number(sheet.querySelector("#f-tva-mo").value),
+          });
+        }
+        ia.setKey(sheet.querySelector("#f-key").value);
+        close();
+      } catch (e) { alert(e.message); bouton.disabled = false; }
+    });
+    sheet.querySelector("#clear").addEventListener("click", () => {
+      ia.setKey("");
+      sheet.querySelector("#f-key").value = "";
+    });
 
     // Bloc Cloud / synchronisation
     const blocCloud = sheet.querySelector("#reg-cloud");

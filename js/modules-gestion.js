@@ -439,7 +439,9 @@
               <input type="file" name="fichier" accept=".pdf,image/jpeg,image/png,image/webp" required></label>
             <button class="primary" type="submit">Importer</button>
           </form>
-          <p class="reg-hint">Le fichier reste sur votre appareil. Aucune lecture automatique n'est branchée pour l'instant : vous saisissez vous-même ce que contient la facture.</p>
+          <p class="reg-hint">${api.estCloud
+            ? "Le fichier original est conservé dans l'espace privé de votre entreprise."
+            : "Le fichier original est conservé dans le stockage local de ce navigateur."} Aucune lecture automatique n'est branchée pour l'instant : vous saisissez vous-même ce que contient la facture.</p>
         </div>
         <div class="module-card">
           <div class="module-card-title"><h2>Documents</h2><span>${docs.length}</span></div>
@@ -466,17 +468,38 @@
     async function ouvrir(id) {
       const d = await api.getFactureFournisseur(id);
       const detail = root.querySelector("[data-detail]");
+      const originalHtml = '<button class="ghost2" type="button" data-original>Ouvrir le justificatif original</button>';
+      const brancherOriginal = () => {
+        const bouton = detail.querySelector("[data-original]");
+        if (!bouton) return;
+        bouton.addEventListener("click", async () => {
+          bouton.disabled = true;
+          try {
+            const original = await api.getJustificatifFournisseur(id);
+            const lien = document.createElement("a");
+            lien.href = original.url;
+            lien.download = original.nom || d.nomFichier;
+            lien.target = "_blank";
+            lien.rel = "noopener";
+            lien.click();
+            if (original.revoke) setTimeout(() => URL.revokeObjectURL(original.url), 10000);
+          } catch (e) { alert(e.message); }
+          finally { bouton.disabled = false; }
+        });
+      };
       if (d.statut === "valide" || d.statut === "rejete") {
         detail.innerHTML = `<div class="module-card"><h2>${esc(d.nomFichier)}</h2>
           <p class="reg-hint">${d.statut === "valide"
             ? "Document validé et figé. Les lignes rattachées sont entrées en stock."
-            : "Document rejeté : " + esc(d.motifRejet)}</p></div>`;
+            : "Document rejeté : " + esc(d.motifRejet)}</p>${originalHtml}</div>`;
+        brancherOriginal();
         return;
       }
       const l0 = d.lignes[0];
       detail.innerHTML = `
         <div class="module-card">
           <h2>Ce que contient ${esc(d.nomFichier)}</h2>
+          ${originalHtml}
           <form class="module-form" data-saisie>
             <label>Fournisseur<input name="fournisseur" value="${esc(d.fournisseur)}" required></label>
             <label>Numéro de pièce<input name="numeroPiece" value="${esc(d.numeroPiece)}"></label>
@@ -502,6 +525,7 @@
           </div>
           <p class="reg-hint">La validation crée les entrées de stock et fige le document. Elle est définitive.</p>
         </div>` : ""}`;
+      brancherOriginal();
 
       detail.querySelector("[data-saisie]").addEventListener("submit", async (ev) => {
         ev.preventDefault();
@@ -552,7 +576,7 @@
       if (!fichier) return;
       try {
         await api.importerFactureFournisseur({
-          nom: fichier.name, typeMime: fichier.type, tailleOctets: fichier.size,
+          nom: fichier.name, typeMime: fichier.type, tailleOctets: fichier.size, contenu: fichier,
         });
         S.rerender();
       } catch (e) { alert(e.message); }

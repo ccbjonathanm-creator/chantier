@@ -61,6 +61,7 @@
       heure: r.heure || "",
       client: r.client || "",
       clientId: r.client_id || null,
+      devisId: r.devis_id || null,
       adresse: r.adresse || "",
       tel: r.tel || "",
       description: r.description || "",
@@ -162,13 +163,17 @@
       penalitesRetard: p.penalites_retard,
       indemniteRecouvrement: Number(p.indemnite_recouvrement),
       mentionTva: p.mention_tva || "",
+      tauxHoraireVente: Number(p.taux_horaire_vente),
+      coutHoraireInterne: Number(p.cout_horaire_interne),
+      tvaMainOeuvre: Number(p.tva_main_oeuvre),
     };
   }
 
   function mapFacture(f) {
     return {
       id: f.id, clientId: f.client_id, devisId: f.devis_id || null,
-      genre: f.genre, avoirDe: f.avoir_de || null, numero: f.numero || null, statut: f.statut,
+      genre: f.genre, avoirDe: f.avoir_de || null, origine: f.origine || "devis",
+      numero: f.numero || null, statut: f.statut,
       dateEmission: f.date_emission || null, dateEcheance: f.date_echeance || null,
       clientSnapshot: f.client_snapshot || {}, vendeurSnapshot: f.vendeur_snapshot || {},
       contenuSnapshot: f.contenu_snapshot || null,
@@ -196,6 +201,43 @@
     return {
       id: p.id, factureId: p.facture_id, montant: Number(p.montant),
       payeLe: p.paye_le, moyen: p.moyen, note: p.note || "",
+    };
+  }
+
+  function mapEmplacement(e) {
+    return { id: e.id, libelle: e.libelle, archiveLe: e.archive_le || null };
+  }
+
+  function mapMouvementStock(m) {
+    return {
+      id: m.id, catalogItemId: m.catalog_item_id, emplacementId: m.emplacement_id,
+      type: m.type, quantite: Number(m.quantite),
+      prixUnitaire: m.prix_unitaire == null ? null : Number(m.prix_unitaire),
+      interventionId: m.intervention_id || null, motif: m.motif || "",
+      compenseId: m.compense_id || null, creePar: m.cree_par || null,
+      createdAt: m.created_at,
+    };
+  }
+
+  function mapFactureFournisseur(d) {
+    return {
+      id: d.id, nomFichier: d.nom_fichier, typeMime: d.type_mime,
+      tailleOctets: Number(d.taille_octets), storagePath: d.storage_path || null,
+      statut: d.statut, fournisseur: d.fournisseur || "", numeroPiece: d.numero_piece || "",
+      datePiece: d.date_piece || null,
+      totalHT: d.total_ht == null ? null : Number(d.total_ht),
+      totalTTC: d.total_ttc == null ? null : Number(d.total_ttc),
+      confiances: d.confiances || {}, valideLe: d.valide_le || null,
+      validePar: d.valide_par || null, rejeteLe: d.rejete_le || null,
+      motifRejet: d.motif_rejet || "", createdAt: d.created_at,
+    };
+  }
+
+  function mapFactureFournisseurLigne(l) {
+    return {
+      id: l.id, documentId: l.document_id, position: Number(l.position),
+      libelle: l.libelle, quantite: Number(l.quantite), prixUnitaire: Number(l.prix_unitaire),
+      catalogItemId: l.catalog_item_id || null, confiance: l.confiance,
     };
   }
 
@@ -698,6 +740,9 @@
         penalites_retard: patch.penalitesRetard,
         indemnite_recouvrement: 40,
         mention_tva: patch.mentionTva || null,
+        taux_horaire_vente: patch.tauxHoraireVente,
+        cout_horaire_interne: patch.coutHoraireInterne,
+        tva_main_oeuvre: patch.tvaMainOeuvre,
       };
       const { data, error } = await client().from("parametres_facturation")
         .upsert(row, { onConflict: "entreprise_id" }).select().single();
@@ -972,6 +1017,291 @@
         boom(eMaj);
       }
       return mapPaiement(data);
+    },
+
+    // --- Stock réel (PALIER 4) ---
+    async listEmplacements() {
+      const { data, error } = await client().from("stock_emplacements").select("*")
+        .is("archive_le", null).order("libelle");
+      boom(error);
+      return (data || []).map(mapEmplacement);
+    },
+    async createEmplacement(libelle) {
+      const nom = String(libelle || "").trim();
+      if (!nom) throw new Error("Le nom de l'emplacement est obligatoire");
+      const { data, error } = await client().from("stock_emplacements").insert({
+        entreprise_id: entrepriseId, libelle: nom,
+      }).select().single();
+      boom(error);
+      return mapEmplacement(data);
+    },
+    async listMouvementsStock(filtre) {
+      filtre = filtre || {};
+      let q = client().from("stock_mouvements").select("*").order("created_at", { ascending: false });
+      if (filtre.interventionId) q = q.eq("intervention_id", filtre.interventionId);
+      if (filtre.catalogItemId) q = q.eq("catalog_item_id", filtre.catalogItemId);
+      const { data, error } = await q;
+      boom(error);
+      return (data || []).map(mapMouvementStock);
+    },
+    async niveauxStock() {
+      const { data, error } = await client().from("stock_niveaux").select("*");
+      boom(error);
+      return (data || []).map((n) => ({
+        catalogItemId: n.catalog_item_id, emplacementId: n.emplacement_id,
+        quantite: Number(n.quantite), valeur: Number(n.valeur),
+      }));
+    },
+    async ajouterMouvementStock(mvt) {
+      const { data, error } = await client().from("stock_mouvements").insert({
+        entreprise_id: entrepriseId, catalog_item_id: mvt.catalogItemId,
+        emplacement_id: mvt.emplacementId, type: mvt.type,
+        quantite: Number(mvt.quantite),
+        prix_unitaire: mvt.prixUnitaire == null ? null : Number(mvt.prixUnitaire),
+        intervention_id: mvt.interventionId || null, motif: String(mvt.motif || "").trim(),
+        compense_id: mvt.compenseId || null, cree_par: mvt.creePar || null,
+      }).select().single();
+      boom(error);
+      return mapMouvementStock(data);
+    },
+    async annulerMouvementStock(mouvementId, motif, auteurId) {
+      const { data: origine, error } = await client().from("stock_mouvements").select("*")
+        .eq("id", mouvementId).maybeSingle();
+      boom(error);
+      if (!origine) throw new Error("Mouvement à compenser introuvable");
+      return this.ajouterMouvementStock({
+        catalogItemId: origine.catalog_item_id, emplacementId: origine.emplacement_id,
+        type: "correction", quantite: -Number(origine.quantite),
+        prixUnitaire: origine.prix_unitaire, interventionId: origine.intervention_id,
+        motif: String(motif || "Annulation").trim(), compenseId: origine.id,
+        creePar: auteurId || null,
+      });
+    },
+
+    // --- Rentabilité et facture depuis le réel (PALIER 5) ---
+    async rattacherChantierAuDevis(interventionId, devisId) {
+      const { data, error } = await client().from("interventions")
+        .update({ devis_id: devisId || null }).eq("id", interventionId).select().single();
+      boom(error);
+      return mapInter(data);
+    },
+    async reelDuChantier(devisId) {
+      const { data: interventions, error } = await client().from("interventions")
+        .select("id").eq("devis_id", devisId);
+      boom(error);
+      const ids = (interventions || []).map((i) => i.id);
+      if (!ids.length) return { devisId, heuresReelles: 0, materiaux: [], nbInterventions: 0 };
+      const [{ data: pointages, error: ePts }, { data: mouvements, error: eMvt }] = await Promise.all([
+        client().from("pointages").select("debut,fin").in("intervention_id", ids).not("fin", "is", null),
+        client().from("stock_mouvements").select("catalog_item_id,quantite,prix_unitaire,type")
+          .in("intervention_id", ids).in("type", ["consommation", "retour"]),
+      ]);
+      boom(ePts); boom(eMvt);
+      const heures = (pointages || []).reduce((s, p) =>
+        s + (new Date(p.fin).getTime() - new Date(p.debut).getTime()) / 3600000, 0);
+      const parArticle = {};
+      (mouvements || []).forEach((m) => {
+        const net = -Number(m.quantite);
+        const cle = m.catalog_item_id;
+        if (!parArticle[cle]) parArticle[cle] = { catalogItemId: cle, quantite: 0, cout: 0, prixUnitaire: 0 };
+        parArticle[cle].quantite = arrondir(parArticle[cle].quantite + net);
+        parArticle[cle].cout = arrondir(parArticle[cle].cout + net * (Number(m.prix_unitaire) || 0));
+      });
+      Object.values(parArticle).forEach((a) => {
+        a.prixUnitaire = a.quantite ? arrondir(a.cout / a.quantite) : 0;
+      });
+      return {
+        devisId, heuresReelles: Math.round(heures * 100) / 100,
+        materiaux: Object.values(parArticle).filter((a) => a.quantite !== 0),
+        nbInterventions: ids.length,
+      };
+    },
+    async proposerFactureReelle(devisId) {
+      const [devis, params, reel, articles] = await Promise.all([
+        this.getDevis(devisId), this.getParametresFacturation(),
+        this.reelDuChantier(devisId), this.listCatalogItems(),
+      ]);
+      if (!devis) throw new Error("Devis introuvable");
+      if (devis.statut !== "accepte") throw new Error("Seul un devis accepté peut être facturé");
+      const lignes = [];
+      if (reel.heuresReelles > 0) lignes.push({
+        origine: "heures", catalogItemId: null, libelle: "Main d'œuvre", unite: "h",
+        quantite: reel.heuresReelles, prixUnitaireHT: Number(params.tauxHoraireVente),
+        tauxTVA: Number(params.tvaMainOeuvre),
+      });
+      reel.materiaux.forEach((m) => {
+        const article = articles.find((a) => a.id === m.catalogItemId);
+        lignes.push({
+          origine: "materiaux", catalogItemId: m.catalogItemId,
+          libelle: article ? article.label : "Matériau", unite: article ? article.unit : "u",
+          quantite: m.quantite,
+          prixUnitaireHT: article ? Number(article.unitPriceExclTax) : m.prixUnitaire,
+          tauxTVA: article ? Number(article.vatRate) : 10,
+        });
+      });
+      let ht = 0; let tva = 0;
+      lignes.forEach((l) => {
+        const ligneHT = arrondir(l.quantite * l.prixUnitaireHT);
+        ht += ligneHT; tva += arrondir(ligneHT * l.tauxTVA / 100);
+      });
+      const totalReel = { ht: arrondir(ht), tva: arrondir(tva), ttc: arrondir(ht + tva) };
+      const totalDevis = { ht: devis.totalHT, tva: devis.totalTVA, ttc: devis.totalTTC };
+      const ecarts = [];
+      const ecartHT = arrondir(totalReel.ht - totalDevis.ht);
+      if (ecartHT !== 0) ecarts.push({
+        type: ecartHT > 0 ? "depassement" : "economie",
+        libelle: (ecartHT > 0 ? "Le réel dépasse le devis de " : "Le réel est inférieur au devis de ")
+          + Math.abs(ecartHT).toFixed(2).replace(".", ",") + " € HT", montant: ecartHT,
+      });
+      if (!lignes.length) ecarts.push({
+        type: "vide", libelle: "Aucune heure pointée ni matériau consommé sur ce chantier. Rien à facturer depuis le réel.", montant: 0,
+      });
+      reel.materiaux.forEach((m) => {
+        if (!(devis.lignes || []).some((l) => l.catalogItemId === m.catalogItemId)) {
+          const article = articles.find((a) => a.id === m.catalogItemId);
+          ecarts.push({ type: "hors_devis", libelle: "« " + (article ? article.label : "Matériau") + " » a été posé mais n'était pas au devis", montant: 0 });
+        }
+      });
+      const coutMainOeuvre = arrondir(reel.heuresReelles * Number(params.coutHoraireInterne));
+      const coutMateriaux = arrondir(reel.materiaux.reduce((s, m) => s + m.cout, 0));
+      const marge = arrondir(totalReel.ht - coutMainOeuvre - coutMateriaux);
+      return {
+        devisId, lignes, reel, totalReel, totalDevis, ecarts,
+        rentabilite: {
+          chiffreAffairesHT: totalReel.ht, coutMainOeuvre, coutMateriaux, marge,
+          tauxMarge: totalReel.ht > 0 ? Math.round(marge / totalReel.ht * 1000) / 10 : 0,
+        },
+      };
+    },
+    async creerFactureDepuisReel(devisId, lignesValidees) {
+      const devis = await this.getDevis(devisId);
+      if (!devis) throw new Error("Devis introuvable");
+      if (devis.statut !== "accepte") throw new Error("Seul un devis accepté peut être facturé");
+      if (!Array.isArray(lignesValidees) || !lignesValidees.length) throw new Error("Aucune ligne validée : rien à facturer");
+      const { data: existante, error: eExiste } = await client().from("factures").select("id")
+        .eq("devis_id", devisId).neq("genre", "avoir").neq("statut", "annulee").limit(1);
+      boom(eExiste);
+      if (existante && existante.length) throw new Error("Une facture existe déjà pour ce devis");
+      const [{ data: cli, error: eCli }, params] = await Promise.all([
+        client().from("clients").select("*").eq("id", devis.clientId).maybeSingle(),
+        this.getParametresFacturation(),
+      ]);
+      boom(eCli);
+      if (!cli) throw new Error("Client introuvable");
+      const { data: facture, error: eFact } = await client().from("factures").insert({
+        entreprise_id: entrepriseId, client_id: devis.clientId, devis_id: devisId,
+        genre: "facture", origine: "reel", statut: "brouillon",
+        client_snapshot: { nom: cli.display_name, kind: cli.kind, adresse: cli.billing_address_line1, codePostal: cli.billing_postal_code, ville: cli.billing_city },
+        vendeur_snapshot: params.vendeurSnapshot, conditions_paiement: params.conditionsPaiement,
+        penalites_retard: params.penalitesRetard,
+        indemnite_recouvrement: cli.kind === "company" ? 40 : null, mention_tva: params.mentionTva,
+      }).select().single();
+      boom(eFact);
+      const rows = lignesValidees.map((l, i) => ({
+        entreprise_id: entrepriseId, facture_id: facture.id, catalog_item_id: l.catalogItemId || null,
+        position: i + 1, libelle_snapshot: l.libelle, description_snapshot: l.description || "",
+        unite_snapshot: l.unite || "u", quantite: Number(l.quantite),
+        prix_unitaire_ht: Number(l.prixUnitaireHT), taux_tva: Number(l.tauxTVA),
+      }));
+      const { error: eLignes } = await client().from("facture_lignes").insert(rows);
+      boom(eLignes);
+      await recalculerTotauxFacture(facture.id);
+      return this.getFacture(facture.id);
+    },
+
+    // --- Factures fournisseurs et justificatifs privés (PALIER 7) ---
+    async importerFactureFournisseur(fichier) {
+      const types = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+      const nom = String(fichier.nom || "").trim();
+      const taille = Number(fichier.tailleOctets) || 0;
+      if (!nom) throw new Error("Nom de fichier manquant");
+      if (types.indexOf(fichier.typeMime) === -1) throw new Error("Format non accepté : seuls PDF, JPEG, PNG et WebP sont traités");
+      if (taille <= 0) throw new Error("Fichier vide");
+      if (taille > 20971520) throw new Error("Fichier trop lourd : 20 Mo au maximum");
+      if (!fichier.contenu || typeof fichier.contenu.arrayBuffer !== "function") throw new Error("Le contenu du fichier est manquant : import annulé");
+      const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID()
+        : "00000000-0000-4000-8000-" + Date.now().toString().padStart(12, "0").slice(-12);
+      const nomSur = nom.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180);
+      const storagePath = entrepriseId + "/" + id + "/" + nomSur;
+      const bucket = client().storage.from("clicchantier-justificatifs");
+      const { error: eUpload } = await bucket.upload(storagePath, fichier.contenu, {
+        contentType: fichier.typeMime, upsert: false,
+      });
+      boom(eUpload, "Le justificatif n'a pas pu être stocké : " + (eUpload && eUpload.message || "erreur inconnue"));
+      const { data, error } = await client().from("factures_fournisseurs").insert({
+        id, entreprise_id: entrepriseId, nom_fichier: nom, type_mime: fichier.typeMime,
+        taille_octets: taille, storage_path: storagePath, statut: "importe",
+      }).select().single();
+      if (error) {
+        await bucket.remove([storagePath]);
+        boom(error);
+      }
+      return mapFactureFournisseur(data);
+    },
+    async listFacturesFournisseurs() {
+      const { data, error } = await client().from("factures_fournisseurs").select("*")
+        .order("created_at", { ascending: false });
+      boom(error);
+      return (data || []).map(mapFactureFournisseur);
+    },
+    async getFactureFournisseur(id) {
+      const { data, error } = await client().from("factures_fournisseurs").select("*")
+        .eq("id", id).maybeSingle();
+      boom(error);
+      if (!data) return null;
+      const { data: lignes, error: eLignes } = await client().from("factures_fournisseurs_lignes")
+        .select("*").eq("document_id", id).order("position");
+      boom(eLignes);
+      return Object.assign(mapFactureFournisseur(data), { lignes: (lignes || []).map(mapFactureFournisseurLigne) });
+    },
+    async getJustificatifFournisseur(id) {
+      const document = await this.getFactureFournisseur(id);
+      if (!document) throw new Error("Document introuvable");
+      if (!document.storagePath) throw new Error("Le fichier original n'est pas disponible");
+      const { data, error } = await client().storage.from("clicchantier-justificatifs")
+        .createSignedUrl(document.storagePath, 60);
+      boom(error);
+      if (!data || !data.signedUrl) throw new Error("Lien temporaire indisponible");
+      return { url: data.signedUrl, nom: document.nomFichier, typeMime: document.typeMime, revoke: false };
+    },
+    async enregistrerExtraction(documentId, extraction) {
+      const { data, error } = await client().from("factures_fournisseurs").update({
+        statut: "extrait", fournisseur: String(extraction.fournisseur || "").trim(),
+        numero_piece: String(extraction.numeroPiece || "").trim(), date_piece: extraction.datePiece || null,
+        total_ht: extraction.totalHT == null ? null : arrondir(extraction.totalHT),
+        total_ttc: extraction.totalTTC == null ? null : arrondir(extraction.totalTTC),
+        confiances: extraction.confiances || {},
+      }).eq("id", documentId).select().single();
+      boom(error);
+      const { error: eSuppr } = await client().from("factures_fournisseurs_lignes").delete().eq("document_id", documentId);
+      boom(eSuppr);
+      const rows = (extraction.lignes || []).map((l, i) => ({
+        entreprise_id: entrepriseId, document_id: documentId, position: i + 1,
+        libelle: String(l.libelle || "").trim() || "Ligne", quantite: Number(l.quantite) || 1,
+        prix_unitaire: Math.max(0, Number(l.prixUnitaire) || 0),
+        catalog_item_id: l.catalogItemId || null, confiance: l.confiance || "a_verifier",
+      }));
+      if (rows.length) {
+        const { error: eInsert } = await client().from("factures_fournisseurs_lignes").insert(rows);
+        boom(eInsert);
+      }
+      return mapFactureFournisseur(data);
+    },
+    async validerFactureFournisseur(documentId, options) {
+      const o = options || {};
+      const { data, error } = await client().rpc("valider_facture_fournisseur", {
+        p_document_id: documentId, p_emplacement_id: o.emplacementId,
+        p_accepter_orphelines: !!o.accepterOrphelines,
+      });
+      boom(error);
+      return this.getFactureFournisseur(documentId);
+    },
+    async rejeterFactureFournisseur(documentId, motif) {
+      const { data, error } = await client().from("factures_fournisseurs").update({
+        statut: "rejete", rejete_le: new Date().toISOString(), motif_rejet: String(motif || "").trim(),
+      }).eq("id", documentId).select().single();
+      boom(error);
+      return mapFactureFournisseur(data);
     },
 
     // --- Interventions / chantiers ---

@@ -11,6 +11,66 @@
 
   const STORE_KEY = "chantier_demo_v3";
   const SESSION_KEY = "chantier_session_v1";
+  const DOCUMENTS_DB = "clicchantier_documents_v1";
+  const DOCUMENTS_STORE = "justificatifs";
+
+  function baseDocuments() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("Le stockage local de fichiers n'est pas disponible dans ce navigateur"));
+        return;
+      }
+      const requete = indexedDB.open(DOCUMENTS_DB, 1);
+      requete.onupgradeneeded = () => {
+        if (!requete.result.objectStoreNames.contains(DOCUMENTS_STORE)) {
+          requete.result.createObjectStore(DOCUMENTS_STORE, { keyPath: "id" });
+        }
+      };
+      requete.onsuccess = () => resolve(requete.result);
+      requete.onerror = () => reject(requete.error || new Error("Stockage local inaccessible"));
+    });
+  }
+
+  async function stockerJustificatifLocal(id, fichier) {
+    const db = await baseDocuments();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
+        tx.objectStore(DOCUMENTS_STORE).put({
+          id, blob: fichier.contenu, nom: fichier.nom, typeMime: fichier.typeMime,
+        });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error("Échec du stockage du justificatif"));
+        tx.onabort = () => reject(tx.error || new Error("Stockage du justificatif annulé"));
+      });
+    } finally { db.close(); }
+  }
+
+  async function lireJustificatifLocal(id) {
+    const db = await baseDocuments();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+        const requete = tx.objectStore(DOCUMENTS_STORE).get(id);
+        requete.onsuccess = () => resolve(requete.result || null);
+        requete.onerror = () => reject(requete.error || new Error("Lecture du justificatif impossible"));
+      });
+    } finally { db.close(); }
+  }
+
+  async function supprimerJustificatifLocal(id) {
+    let db;
+    try { db = await baseDocuments(); } catch (e) { return; }
+    try {
+      await new Promise((resolve) => {
+        const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
+        tx.objectStore(DOCUMENTS_STORE).delete(id);
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+        tx.onabort = resolve;
+      });
+    } finally { db.close(); }
+  }
 
   function uid() {
     return "id_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -414,14 +474,20 @@
       }
 
       // 5) Une facture fournisseur deja importee et controlee.
-      const doc = await api.importerFactureFournisseur({
-        nom: "facture-cedeo-aout.pdf", typeMime: "application/pdf", tailleOctets: 184320,
-      });
-      await api.enregistrerExtraction(doc.id, {
-        fournisseur: "Cédéo Le Creusot", numeroPiece: "FC-2026-4471",
-        datePiece: addDays(j, -9), totalHT: 726.4, totalTTC: 871.68,
-        confiances: { fournisseur: 0.97, numeroPiece: 0.93, datePiece: 0.95, totalHT: 0.99, totalTTC: 0.99 },
-      });
+      try {
+        const contenuDemo = new Blob(["%PDF-1.4\n% Justificatif de démonstration ClicChantier\n%%EOF"], { type: "application/pdf" });
+        const doc = await api.importerFactureFournisseur({
+          nom: "facture-cedeo-aout.pdf", typeMime: "application/pdf",
+          tailleOctets: contenuDemo.size, contenu: contenuDemo,
+        });
+        await api.enregistrerExtraction(doc.id, {
+          fournisseur: "Cédéo Le Creusot", numeroPiece: "FC-2026-4471",
+          datePiece: addDays(j, -9), totalHT: 726.4, totalTTC: 871.68,
+          confiances: { fournisseur: 0.97, numeroPiece: 0.93, datePiece: 0.95, totalHT: 0.99, totalTTC: 0.99 },
+        });
+      } catch (documentError) {
+        if (window.console && console.warn) console.warn("Justificatif de démonstration non stocké :", documentError.message);
+      }
 
       // 6) Les heures reellement pointees sur la salle de bain : sans elles,
       //    l'ecran Rentabilite ne peut rien calculer.
@@ -689,6 +755,11 @@
     },
     async saveParametresFacturation(patch) {
       const db = load();
+      const vente = Number(patch.tauxHoraireVente);
+      const cout = Number(patch.coutHoraireInterne);
+      const tva = Number(patch.tvaMainOeuvre);
+      if (!(vente >= 0) || !(cout >= 0)) throw new Error("Les taux horaires doivent être positifs ou nuls");
+      if ([0, 5.5, 10, 20].indexOf(tva) === -1) throw new Error("Taux de TVA non autorisé");
       Object.assign(db.parametresFacturation, patch);
       // L'indemnité de recouvrement B2B est fixée à 40 € par la loi.
       db.parametresFacturation.indemniteRecouvrement = 40;
@@ -1149,6 +1220,9 @@
       const taille = Number(fichier.tailleOctets) || 0;
       if (taille <= 0) throw new Error("Fichier vide");
       if (taille > 20971520) throw new Error("Fichier trop lourd : 20 Mo au maximum");
+      if (!fichier.contenu || typeof fichier.contenu.arrayBuffer !== "function") {
+        throw new Error("Le contenu du fichier est manquant : import annulé");
+      }
 
       const row = {
         id: uid(), nomFichier: nom, typeMime: fichier.typeMime, tailleOctets: taille,
@@ -1157,8 +1231,14 @@
         valideLe: null, validePar: null, rejeteLe: null, motifRejet: "",
         createdAt: new Date().toISOString(),
       };
-      db.facturesFournisseurs.push(row);
-      save(db);
+      await stockerJustificatifLocal(row.id, fichier);
+      try {
+        db.facturesFournisseurs.push(row);
+        save(db);
+      } catch (e) {
+        await supprimerJustificatifLocal(row.id);
+        throw e;
+      }
       return delay(row);
     },
     async listFacturesFournisseurs() {
@@ -1173,6 +1253,14 @@
       const lignes = db.facturesFournisseursLignes
         .filter((l) => l.documentId === id).sort((a, b) => a.position - b.position);
       return delay(Object.assign({}, d, { lignes }));
+    },
+    async getJustificatifFournisseur(id) {
+      const d = load().facturesFournisseurs.find((x) => x.id === id) || null;
+      if (!d) throw new Error("Document introuvable");
+      const fichier = await lireJustificatifLocal(id);
+      if (!fichier || !fichier.blob) throw new Error("Le fichier original n'est pas disponible");
+      const url = URL.createObjectURL(fichier.blob);
+      return { url, nom: fichier.nom || d.nomFichier, typeMime: fichier.typeMime || d.typeMime, revoke: true };
     },
     // Enregistre ce que l'extraction PROPOSE. Le document passe en
     // "extrait", c'est-à-dire EN ATTENTE de validation humaine.
