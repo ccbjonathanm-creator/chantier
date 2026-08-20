@@ -1031,7 +1031,9 @@
       zone.innerHTML = '<p class="empty">Rien à facturer : aucune heure pointée ni matériau consommé sur ce chantier.</p>';
     }
     prop.lignes.forEach((l, i) => {
-      const source = l.origine === "heures" ? "Heures pointées" : "Matériaux consommés";
+      const source = l.origine === "heures" ? "Heures pointées"
+        : l.origine === "forfait_devis" ? "Repris du devis, à confirmer"
+        : "Matériaux consommés";
       const ligne = el(`
         <div class="reconcile-card">
           <label class="reel-ligne">

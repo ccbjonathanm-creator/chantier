@@ -415,13 +415,28 @@
   // les vraies fonctions de l'API : les totaux, la numerotation et les
   // journaux sont calcules comme pour un vrai client, jamais ecrits a la main.
   // ---------------------------------------------------------------------
+  // Version du jeu de demonstration. À INCRÉMENTER dès qu'on corrige les
+  // données d'exemple : sans ça, une démonstration ouverte avant la correction
+  // reste figée à vie sur l'ancienne histoire, et continue de raconter faux.
+  // v2 (2026-08-20) : la main d'oeuvre du devis Roux est passée de 12 h à
+  // 120 €/h (incohérent avec le taux horaire de l'entreprise, l'écart
+  // devis/réel affichait -533,90 €) à 20 h au taux réel de 45 €/h.
+  const AMORCAGE_VERSION = 2;
+
   async function amorcerGestionDemo(api) {
-    const db = load();
-    if (db.demoGestionAmorcee) return;
+    let db = load();
+    if (db.demoGestionAmorcee === AMORCAGE_VERSION) return;
+
+    // Jeu d'une version antérieure : on le régénère au lieu de le compléter,
+    // sinon on cumulerait deux devis et deux factures pour le même chantier.
+    if (db.demoGestionAmorcee) {
+      save(normaliser(seed()));
+      db = load();
+    }
 
     // Marque AVANT le travail : si une etape echoue, on ne reessaie pas en
     // boucle a chaque ouverture de l'application.
-    const d0 = load(); d0.demoGestionAmorcee = true; save(d0);
+    const d0 = load(); d0.demoGestionAmorcee = AMORCAGE_VERSION; save(d0);
 
     try {
       const j = todayISO();
@@ -1535,6 +1550,47 @@
         });
       });
 
+      // 3) Les PRESTATIONS FORFAITAIRES du devis.
+      //
+      // Le reel ne connait que deux choses : les heures pointees et le stock
+      // consomme. Un forfait (diagnostic, deplacement, mise en service) n'est
+      // ni l'un ni l'autre : sans cette reprise il s'evapore, l'artisan
+      // facture moins qu'il n'a vendu et croit avoir fait propre.
+      // Elles sont marquees « a confirmer » : l'humain garde le dernier mot,
+      // il decoche si la prestation n'a finalement pas eu lieu.
+      const idsConsommes = new Set(reel.materiaux.map((m) => m.catalogItemId));
+      const estHoraire = (u) => /^(h|hh|heure|heures)$/i.test(String(u || "").trim());
+      const prevusNonPoses = [];
+
+      lignesDevis.forEach((l) => {
+        // Deja represente par les heures reellement pointees.
+        if (estHoraire(l.uniteSnapshot)) return;
+        // Deja represente par le stock reellement sorti.
+        if (l.catalogItemId && idsConsommes.has(l.catalogItemId)) return;
+
+        const article = l.catalogItemId
+          ? db.catalogItems.find((c) => c.id === l.catalogItemId)
+          : null;
+
+        // Un MATERIAU prevu au devis mais jamais sorti du stock ne se facture
+        // pas : il n'a pas ete pose. On le signale au lieu de le facturer.
+        if (article && article.kind === "product") {
+          prevusNonPoses.push(article.label || l.libelleSnapshot);
+          return;
+        }
+
+        lignes.push({
+          origine: "forfait_devis",
+          catalogItemId: l.catalogItemId || null,
+          libelle: l.libelleSnapshot,
+          unite: l.uniteSnapshot,
+          quantite: l.quantite,
+          prixUnitaireHT: l.prixUnitaireHT,
+          tauxTVA: l.tauxTVA,
+          aConfirmer: true,
+        });
+      });
+
       const totalReel = totauxDepuisLignes(lignes.map((l) => ({
         quantite: l.quantite, prixUnitaireHT: l.prixUnitaireHT, tauxTVA: l.tauxTVA,
       })));
@@ -1559,6 +1615,16 @@
           montant: 0,
         });
       }
+      // Un matériau prévu au devis et jamais sorti du stock : on ne le facture
+      // pas, mais l'artisan doit savoir pourquoi son réel est plus bas.
+      prevusNonPoses.forEach((nom) => {
+        ecarts.push({
+          type: "non_pose",
+          libelle: "« " + nom + " » était au devis mais n'est jamais sorti du stock : non facturé",
+          montant: 0,
+        });
+      });
+
       // Un matériau posé mais absent du devis mérite d'être signalé.
       reel.materiaux.forEach((m) => {
         if (!lignesDevis.some((l) => l.catalogItemId === m.catalogItemId)) {
