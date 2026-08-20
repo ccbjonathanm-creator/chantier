@@ -80,9 +80,20 @@ test("le module vocal réutilise la dictée et Groq avec un repli local annoncé
 test("la PWA charge atomiquement les nouveaux fichiers du lot 2", () => {
   const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const sw = fs.readFileSync(path.join(root, "sw.js"), "utf8");
-  assert.match(index, /js\/documents\.js\?v=37/);
-  assert.match(index, /js\/modules-gestion\.js\?v=37/);
-  assert.match(sw, /chantier-v37/);
-  assert.match(sw, /js\/documents\.js\?v=37/);
-  assert.match(sw, /js\/modules-gestion\.js\?v=37/);
+  // La version n'est PAS figée ici : on vérifie qu'elle est la même partout.
+  // Figer « v=37 » cassait ce test à chaque montée de version, ce qui poussait
+  // à ne plus monter la version, donc à laisser les navigateurs sur l'ancienne
+  // application. Le vrai défaut à attraper est un fichier resté en arrière.
+  const version = (sw.match(/chantier-v(\d+)/) || [])[1];
+  assert.ok(version, "sw.js doit porter une version chantier-vN");
+  // Comparaison de texte simple : une expression régulière construite à la
+  // volée exige d'échapper les points et les barres, et se trompe en silence.
+  for (const fichier of ["js/documents.js", "js/modules-gestion.js", "js/acces.js"]) {
+    const attendu = fichier + "?v=" + version;
+    assert.ok(index.includes(attendu), fichier + " doit être versionné v=" + version + " dans index.html");
+    assert.ok(sw.includes(attendu), fichier + " doit être versionné v=" + version + " dans sw.js");
+  }
+  // Aucun fichier ne doit rester sur une version antérieure.
+  const retardataires = (index.match(/\?v=(\d+)/g) || []).filter((v) => v !== "?v=" + version);
+  assert.deepEqual(retardataires, [], "des fichiers d'index.html sont restés sur une ancienne version");
 });
