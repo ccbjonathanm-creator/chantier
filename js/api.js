@@ -254,14 +254,30 @@
   }
 
   function load() {
+    let raw = null;
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const db = normaliser(JSON.parse(raw));
         save(db);
         return db;
       }
-    } catch (e) {}
+    } catch (e) {
+      // Une ecriture interrompue peut laisser un JSON illisible. On conserve
+      // TOUJOURS la valeur brute avant de reinitialiser la demonstration :
+      // elle pourra ainsi etre transmise au support et, si possible, recuperee.
+      const horodatage = new Date().toISOString().replace(/[:.]/g, "-");
+      const cleSecours = STORE_KEY + ".corrompu." + horodatage;
+      try {
+        localStorage.setItem(cleSecours, raw == null ? "" : raw);
+      } catch (sauvegardeError) {
+        throw new Error("La sauvegarde locale est illisible et sa copie de secours a échoué. Rien n'a été remplacé. Libérez de l'espace puis rechargez l'application.");
+      }
+      const message = "La sauvegarde locale était illisible. Une copie a été conservée sous « "
+        + cleSecours + " » avant de réinitialiser la démonstration.";
+      if (typeof window.alert === "function") window.alert(message);
+      else if (window.console && console.error) console.error(message, e);
+    }
     // Le jeu de démonstration passe LUI AUSSI par normaliser : sans ça, les
     // collections ajoutées par les paliers successifs sont absentes au tout
     // premier appel, et le premier écran ouvert décide de ce qui plante.

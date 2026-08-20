@@ -2570,8 +2570,46 @@
   }
 
   // ---------- Routeur ----------
-  async function render() {
-    if (!state.me) { renderLogin(); return; }
+  function messageErreurUtilisateur(error) {
+    const message = String(error && error.message || error || "").trim();
+    if (/Failed to fetch|NetworkError|Load failed|ERR_INTERNET|hors ligne/i.test(message)) {
+      return "ClicChantier ne parvient pas à joindre la base en ligne. Vérifiez votre connexion, puis réessayez.";
+    }
+    if (/column .* does not exist|schema cache|relation .* does not exist|PGRST\d+/i.test(message)) {
+      return "La base en ligne doit être mise à jour avant de pouvoir utiliser cette partie de ClicChantier. Aucune donnée n'a été modifiée.";
+    }
+    return message || "ClicChantier n'a pas pu charger vos données. Réessayez dans quelques instants.";
+  }
+
+  function afficherErreurGlobale(error) {
+    if (console && console.error) console.error("Erreur ClicChantier :", error);
+    const message = messageErreurUtilisateur(error);
+    const wrap = el(`
+      <div class="login erreur-globale" role="alert">
+        <div class="brand">
+          <div class="logo">${logoSVG()}</div>
+          <h1>ClicChantier</h1>
+        </div>
+        <div class="login-card">
+          <h2>Impossible de charger vos données</h2>
+          <p class="login-hint">${esc(message)}</p>
+          <button class="primary block" id="reessayer" type="button">Réessayer</button>
+          ${api.estCloud && state.me ? '<button class="ghost-btn block" id="changer-compte" type="button">Changer de compte</button>' : ""}
+          <p class="mode-hint">Si le problème continue, notez ce message et contactez l'assistance. Ne recréez pas vos données.</p>
+        </div>
+      </div>`);
+    wrap.querySelector("#reessayer").addEventListener("click", () => location.reload());
+    const changer = wrap.querySelector("#changer-compte");
+    if (changer) changer.addEventListener("click", () => {
+      api.setSession(null);
+      location.reload();
+    });
+    app.innerHTML = "";
+    app.appendChild(wrap);
+  }
+
+  async function renderInterne() {
+    if (!state.me) return renderLogin();
     // Acces (cloud) : si l'abonnement est ferme (essai expire, past_due,
     // impaye, resilie hors periode payee), on passe en LECTURE SEULE. La
     // consultation reste possible ; les ecritures sont bloquees (serveur + UI)
@@ -2592,6 +2630,15 @@
       return viewPlanning();
     }
     return viewTournee();
+  }
+
+  async function render() {
+    try {
+      return await renderInterne();
+    } catch (error) {
+      afficherErreurGlobale(error);
+      return null;
+    }
   }
 
   // Ponts pour les modules : re-render et navigation.
@@ -2615,9 +2662,11 @@
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     }
+    let erreurDemarrage = null;
     try {
       if (api.init) await api.init(); // cloud : restaure la session + charge le profil
     } catch (e) {
+      erreurDemarrage = e;
       console.warn("init backend:", e);
     }
     // Retour de Stripe Checkout. REGLE 8 : on n'accorde JAMAIS l'acces sur le
@@ -2643,6 +2692,10 @@
         }
       }
     } catch (e) {}
+    if (erreurDemarrage) {
+      afficherErreurGlobale(erreurDemarrage);
+      return;
+    }
     const sess = api.getSession();
     if (sess) {
       state.me = sess;

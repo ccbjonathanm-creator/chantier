@@ -293,12 +293,18 @@
     if (!prof) { me = null; entrepriseId = null; return null; } // connecte mais sans entreprise
     me = mapProfil(prof);
     entrepriseId = prof.entreprise_id;
-    const { data: ent } = await c.from("entreprises").select("nom, code, metier").eq("id", entrepriseId).maybeSingle();
+    const { data: ent, error: entrepriseError } = await c.from("entreprises")
+      .select("nom, code, metier").eq("id", entrepriseId).maybeSingle();
+    boom(entrepriseError,
+      "Impossible de charger votre entreprise. La base en ligne doit être mise à jour avant de pouvoir utiliser ClicChantier.");
+    if (!ent) throw new Error("Votre entreprise est introuvable. Contactez l'assistance avant de créer de nouvelles données.");
     entreprise = ent || null;
     employesCache = null; // sera recharge
     // L'abonnement est la source de verite. La table formule_modules
     // contient la correspondance configurable, sans achat individuel.
-    const { data: fact } = await c.from("entreprise_facturation").select("*").maybeSingle();
+    const { data: fact, error: facturationError } = await c
+      .from("entreprise_facturation").select("*").maybeSingle();
+    boom(facturationError, "Impossible de charger votre abonnement. Réessayez dans quelques instants.");
     factCache = fact ? mapFacturation(fact) : null;
     modulesCache = [];
     if (fact && fact.formule) {
@@ -307,12 +313,11 @@
         .select("module")
         .eq("formule", fact.formule)
         .eq("actif", true);
-      if (!modulesError) {
-        modulesCache = (mods || []).map((m) => m.module);
-        if (!modulesCache.length) console.info("Aucun module associé à la formule " + fact.formule
-          + ", voir 11b_seed_formules_EXEMPLE.sql.");
-      }
-      else console.warn("Droits modules par formule indisponibles :", modulesError.message);
+      boom(modulesError,
+        "Impossible de charger les modules inclus dans votre formule. La base en ligne doit être mise à jour.");
+      modulesCache = (mods || []).map((m) => m.module);
+      if (!modulesCache.length) console.info("Aucun module associé à la formule " + fact.formule
+        + ", voir 11b_seed_formules_EXEMPLE.sql.");
     }
     return me;
   }

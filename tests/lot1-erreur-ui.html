@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test UI lot 1, erreur cloud</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/premium.css">
+<div id="app"></div>
+<script>
+  window.Chantier = {
+    util: { todayISO: function () { return "2026-08-20"; } },
+    backends: {
+      demo: {
+        estCloud: false,
+        init: async function () {
+          throw new Error("Impossible de charger votre entreprise. La base en ligne doit être mise à jour avant de pouvoir utiliser ClicChantier.");
+        },
+        getSession: function () { return null; },
+        modulesActifs: function () { return []; },
+      },
+    },
+  };
+</script>
+<script src="../js/app.js"></script>
