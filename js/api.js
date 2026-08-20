@@ -205,6 +205,11 @@
     return Math.round((Number(n) || 0) * 100) / 100;
   }
 
+  function enMillisecondes(valeur) {
+    if (typeof valeur === "number") return valeur;
+    return new Date(valeur).getTime();
+  }
+
   // Les totaux se recalculent TOUJOURS depuis les lignes, jamais à la main.
   function totauxDepuisLignes(lignes) {
     let ht = 0;
@@ -841,6 +846,27 @@
         throw new Error("Client professionnel : pénalités de retard et indemnité de 40 € obligatoires");
       }
 
+      // Un avoir doit encore tenir dans le solde réel au moment où il devient
+      // définitif. Deux brouillons concurrents peuvent donc exister, mais le
+      // second ne peut pas être émis si le premier a déjà consommé le solde.
+      if (f.genre === "avoir") {
+        const origine = db.factures.find((x) => x.id === f.avoirDe);
+        if (!origine || origine.genre !== "facture"
+            || (origine.statut !== "emise" && origine.statut !== "payee")) {
+          throw new Error("La facture corrigée par cet avoir n'est plus éligible");
+        }
+        const paye = arrondir(db.facturePaiements
+          .filter((p) => p.factureId === origine.id)
+          .reduce((s, p) => s + Number(p.montant), 0));
+        const autresAvoirs = arrondir(db.factures
+          .filter((a) => a.avoirDe === origine.id && a.id !== f.id
+            && (a.statut === "emise" || a.statut === "payee"))
+          .reduce((s, a) => s + Number(a.totalTTC), 0));
+        if (arrondir(paye + autresAvoirs + Number(f.totalTTC)) > arrondir(origine.totalTTC)) {
+          throw new Error("Cet avoir dépasserait le solde réel de la facture");
+        }
+      }
+
       const annee = new Date().getFullYear();
       f.numero = numeroSuivant(db, f.genre === "avoir" ? "AVOIR" : "FACTURE", annee);
       f.statut = "emise";
@@ -869,8 +895,11 @@
       if (!(montant > 0)) throw new Error("Le montant doit être supérieur à zéro");
       const dejaPaye = arrondir(db.facturePaiements.filter((p) => p.factureId === factureId)
         .reduce((s, p) => s + Number(p.montant), 0));
-      if (arrondir(dejaPaye + montant) > f.totalTTC) {
-        throw new Error("Le total des paiements dépasserait le montant de la facture");
+      const avoirsEmis = arrondir(db.factures
+        .filter((a) => a.avoirDe === factureId && (a.statut === "emise" || a.statut === "payee"))
+        .reduce((s, a) => s + Number(a.totalTTC), 0));
+      if (arrondir(dejaPaye + avoirsEmis + montant) > arrondir(f.totalTTC)) {
+        throw new Error("Ce paiement dépasserait le solde réel de la facture");
       }
       const row = {
         id: uid(), factureId, montant,
@@ -879,7 +908,7 @@
         note: (paiement.note || "").trim(),
       };
       db.facturePaiements.push(row);
-      if (arrondir(dejaPaye + montant) === f.totalTTC) f.statut = "payee";
+      if (arrondir(dejaPaye + avoirsEmis + montant) === arrondir(f.totalTTC)) f.statut = "payee";
       save(db);
       return delay(row);
     },
@@ -899,6 +928,36 @@
         throw new Error("Aucune ligne : rien à corriger");
       }
 
+      const lignesNormalisees = lignes.map((ligne, i) => {
+        const quantite = Number(ligne.quantite);
+        const libelle = String(ligne.libelle || "").trim();
+        const tauxTVA = Number(ligne.tauxTVA);
+        const prixUnitaireHT = Number(ligne.prixUnitaireHT);
+        if (!(quantite > 0)) throw new Error("La quantité doit être supérieure à zéro");
+        if (!libelle) throw new Error("Le libellé de la ligne est obligatoire");
+        if ([0, 5.5, 10, 20].indexOf(tauxTVA) === -1) throw new Error("Taux de TVA non autorisé");
+        if (!(prixUnitaireHT >= 0)) throw new Error("Le prix unitaire doit être positif ou nul");
+        return {
+          id: uid(), factureId: null, catalogItemId: ligne.catalogItemId || null,
+          position: i + 1, libelleSnapshot: libelle,
+          descriptionSnapshot: String(ligne.description || "").trim(),
+          uniteSnapshot: String(ligne.unite || "u").trim(), quantite,
+          prixUnitaireHT: arrondir(prixUnitaireHT), tauxTVA,
+        };
+      });
+      const totalHT = arrondir(lignesNormalisees.reduce((s, l) => s + l.quantite * l.prixUnitaireHT, 0));
+      const totalTVA = arrondir(lignesNormalisees.reduce((s, l) =>
+        s + arrondir(arrondir(l.quantite * l.prixUnitaireHT) * l.tauxTVA / 100), 0));
+      const totalTTC = arrondir(totalHT + totalTVA);
+      const dejaPaye = arrondir(db.facturePaiements
+        .filter((p) => p.factureId === factureId).reduce((s, p) => s + Number(p.montant), 0));
+      const dejaEmis = arrondir(db.factures
+        .filter((a) => a.avoirDe === factureId && (a.statut === "emise" || a.statut === "payee"))
+        .reduce((s, a) => s + Number(a.totalTTC), 0));
+      if (arrondir(dejaPaye + dejaEmis + totalTTC) > arrondir(origine.totalTTC)) {
+        throw new Error("Cet avoir dépasserait le solde réel de la facture");
+      }
+
       const avoir = {
         id: uid(), clientId: origine.clientId, devisId: origine.devisId,
         genre: "avoir", avoirDe: factureId, origine: origine.origine || "devis",
@@ -910,33 +969,15 @@
         penalitesRetard: origine.penalitesRetard,
         indemniteRecouvrement: origine.indemniteRecouvrement,
         mentionTva: origine.mentionTva,
-        totalHT: 0, totalTVA: 0, totalTTC: 0,
+        totalHT, totalTVA, totalTTC,
         valideLe: null, validePar: null, emiseLe: null, annuleeLe: null,
         createdAt: new Date().toISOString(),
       };
+      lignesNormalisees.forEach((l) => { l.factureId = avoir.id; });
       db.factures.push(avoir);
+      db.factureLignes.push(...lignesNormalisees);
       save(db);
-
-      for (let i = 0; i < lignes.length; i += 1) {
-        await this.addFactureLigne(avoir.id, lignes[i]);
-      }
-
-      // On ne rembourse jamais plus qu'on n'a facturé.
-      const apres = load();
-      const cree = apres.factures.find((f) => f.id === avoir.id);
-      const deja = arrondir(apres.factures
-        .filter((a) => a.avoirDe === factureId && a.id !== avoir.id
-          && (a.statut === "emise" || a.statut === "payee"))
-        .reduce((s, a) => s + Number(a.totalTTC), 0));
-      if (arrondir(deja + cree.totalTTC) > arrondir(origine.totalTTC)) {
-        // On retire l'avoir en trop plutôt que de laisser un brouillon faux.
-        apres.factures = apres.factures.filter((f) => f.id !== avoir.id);
-        apres.factureLignes = apres.factureLignes.filter((l) => l.factureId !== avoir.id);
-        save(apres);
-        throw new Error("Le total des avoirs (" + arrondir(deja + cree.totalTTC)
-          + " €) dépasserait la facture (" + arrondir(origine.totalTTC) + " €)");
-      }
-      return delay(cree);
+      return delay(avoir);
     },
     // Ce qui reste RÉELLEMENT dû : facturé, moins payé, moins les avoirs.
     async soldeFacture(factureId) {
@@ -1655,15 +1696,35 @@
     },
     // debut est optionnel : il permet la saisie rétroactive, pour le gars
     // qui a oublié de pointer en arrivant sur le chantier.
-    async demarrerPointage(interventionId, employeId, debut) {
+    async demarrerPointage(interventionId, employeId, debut, finPrecedente) {
       const db = load();
-      // Cloture un eventuel pointage encore ouvert pour ce gars
-      db.pointages.forEach((p) => {
-        if (p.employeId === employeId && !p.fin) p.fin = Date.now();
-      });
       const quand = debut == null ? Date.now() : new Date(debut).getTime();
       if (isNaN(quand)) throw new Error("Heure de début invalide");
       if (quand > Date.now()) throw new Error("Un pointage ne commence pas dans le futur");
+      const ouvert = db.pointages.find((p) => p.employeId === employeId && !p.fin) || null;
+      let fermeture = quand;
+      if (ouvert) {
+        if (quand < enMillisecondes(ouvert.debut)) throw new Error("Le nouveau pointage chevaucherait le précédent");
+        const dureeOuverte = quand - enMillisecondes(ouvert.debut);
+        if (dureeOuverte > 12 * 3600000 && finPrecedente == null) {
+          const e = new Error("Un pointage est resté ouvert plus de 12 heures. Indiquez son heure de fin.");
+          e.code = "pointage-oublie";
+          e.pointageId = ouvert.id;
+          e.debutPrecedent = enMillisecondes(ouvert.debut);
+          e.nouveauDebut = quand;
+          throw e;
+        }
+        if (finPrecedente != null) {
+          fermeture = new Date(finPrecedente).getTime();
+          if (isNaN(fermeture) || fermeture < enMillisecondes(ouvert.debut) || fermeture > quand) {
+            throw new Error("L'heure de fin doit être comprise entre le début oublié et le nouveau pointage");
+          }
+        }
+      }
+      const chevauche = db.pointages.some((p) => p.employeId === employeId && p !== ouvert
+        && enMillisecondes(p.debut) < Date.now() + 1 && enMillisecondes(p.fin || Date.now()) > quand);
+      if (chevauche) throw new Error("Le nouveau pointage chevaucherait des heures déjà enregistrées");
+      if (ouvert) ouvert.fin = fermeture;
       const p = { id: uid(), interventionId, employeId, debut: quand, fin: null };
       db.pointages.push(p);
       const it = db.interventions.find((i) => i.id === interventionId);
@@ -1691,6 +1752,11 @@
       let out = db.pointages.slice();
       if (filtre && filtre.employeId) out = out.filter((p) => p.employeId === filtre.employeId);
       if (filtre && filtre.interventionId) out = out.filter((p) => p.interventionId === filtre.interventionId);
+      if (filtre && (filtre.from || filtre.to)) {
+        const debut = filtre.from ? new Date(filtre.from + "T00:00:00").getTime() : -Infinity;
+        const fin = filtre.to ? new Date(filtre.to + "T00:00:00").getTime() + 86400000 : Infinity;
+        out = out.filter((p) => enMillisecondes(p.debut) < fin && enMillisecondes(p.fin || Date.now()) > debut);
+      }
       return delay(out);
     },
 

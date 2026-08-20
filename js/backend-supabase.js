@@ -168,7 +168,7 @@
   function mapFacture(f) {
     return {
       id: f.id, clientId: f.client_id, devisId: f.devis_id || null,
-      genre: f.genre, numero: f.numero || null, statut: f.statut,
+      genre: f.genre, avoirDe: f.avoir_de || null, numero: f.numero || null, statut: f.statut,
       dateEmission: f.date_emission || null, dateEcheance: f.date_echeance || null,
       clientSnapshot: f.client_snapshot || {}, vendeurSnapshot: f.vendeur_snapshot || {},
       contenuSnapshot: f.contenu_snapshot || null,
@@ -714,18 +714,21 @@
       const { data, error } = await client().from("factures").select("*").eq("id", id).maybeSingle();
       boom(error);
       if (!data) return null;
-      const [{ data: lignes, error: e2 }, { data: paiements, error: e3 }] = await Promise.all([
+      const [{ data: lignes, error: e2 }, { data: paiements, error: e3 }, { data: avoirs, error: e4 }] = await Promise.all([
         client().from("facture_lignes").select("*").eq("facture_id", id).order("position"),
         client().from("facture_paiements").select("*").eq("facture_id", id),
+        client().from("factures").select("total_ttc").eq("avoir_de", id).in("statut", ["emise", "payee"]),
       ]);
-      boom(e2); boom(e3);
+      boom(e2); boom(e3); boom(e4);
       const facture = mapFacture(data);
       const paye = arrondir((paiements || []).reduce((s, p) => s + Number(p.montant), 0));
+      const totalAvoirs = arrondir((avoirs || []).reduce((s, a) => s + Number(a.total_ttc), 0));
       return Object.assign(facture, {
         lignes: (lignes || []).map(mapFactureLigne),
         paiements: (paiements || []).map(mapPaiement),
         totalPaye: paye,
-        reste: arrondir(facture.totalTTC - paye),
+        totalAvoirs,
+        reste: arrondir(facture.totalTTC - paye - totalAvoirs),
       });
     },
     async creerFactureDepuisDevis(devisId) {
@@ -814,6 +817,42 @@
       const ligne = Array.isArray(data) ? data[0] : data;
       if (!ligne) throw new Error("Émission refusée");
       return mapFacture(ligne);
+    },
+    async creerAvoir(factureId, lignes) {
+      if (!Array.isArray(lignes) || !lignes.length) throw new Error("Aucune ligne : rien à corriger");
+      const payload = lignes.map((l, i) => ({
+        position: i + 1,
+        catalog_item_id: l.catalogItemId || null,
+        libelle_snapshot: String(l.libelle || "").trim(),
+        description_snapshot: String(l.description || "").trim(),
+        unite_snapshot: String(l.unite || "u").trim(),
+        quantite: Number(l.quantite),
+        prix_unitaire_ht: Number(l.prixUnitaireHT),
+        taux_tva: Number(l.tauxTVA),
+      }));
+      const { data, error } = await client().rpc("creer_avoir", {
+        p_facture_id: factureId, p_lignes: payload,
+      });
+      boom(error);
+      const ligne = Array.isArray(data) ? data[0] : data;
+      if (!ligne) throw new Error("Création de l'avoir refusée");
+      return mapFacture(ligne);
+    },
+    async soldeFacture(factureId) {
+      const { data, error } = await client().from("factures_solde").select("*")
+        .eq("id", factureId).maybeSingle();
+      boom(error);
+      if (!data) throw new Error("Facture introuvable");
+      return {
+        totalTTC: Number(data.total_ttc), totalPaye: Number(data.total_paye),
+        totalAvoirs: Number(data.total_avoirs), resteDu: Number(data.reste_du),
+      };
+    },
+    async listAvoirsDe(factureId) {
+      const { data, error } = await client().from("factures").select("*")
+        .eq("avoir_de", factureId).order("created_at", { ascending: false });
+      boom(error);
+      return (data || []).map(mapFacture);
     },
     // --- Relances (PALIER 3) ---
     // Les verrous durs (annulation définitive, niveau 2 sans niveau 1,
@@ -913,9 +952,15 @@
     },
 
     async enregistrerPaiement(factureId, paiement) {
+      const solde = await this.soldeFacture(factureId);
+      const montant = arrondir(paiement.montant);
+      if (!(montant > 0)) throw new Error("Le montant doit être supérieur à zéro");
+      if (montant > arrondir(solde.resteDu)) {
+        throw new Error("Ce paiement dépasserait le solde réel de la facture");
+      }
       const { data, error } = await client().from("facture_paiements").insert({
         entreprise_id: entrepriseId, facture_id: factureId,
-        montant: paiement.montant, paye_le: paiement.payeLe || todayISO(),
+        montant, paye_le: paiement.payeLe || todayISO(),
         moyen: paiement.moyen || "virement", note: paiement.note || "",
       }).select().single();
       boom(error);
@@ -1039,17 +1084,29 @@
       boom(error);
       return data && data[0] ? mapPointage(data[0]) : null;
     },
-    async demarrerPointage(interventionId, employeId) {
-      const c = client();
-      const now = new Date().toISOString();
-      // Cloture un eventuel pointage encore ouvert pour ce gars
-      await c.from("pointages").update({ fin: now }).eq("employe_id", employeId).is("fin", null);
-      const { data, error } = await c.from("pointages")
-        .insert({ entreprise_id: entrepriseId, intervention_id: interventionId, employe_id: employeId, debut: now })
-        .select().single();
+    async demarrerPointage(interventionId, employeId, debut, finPrecedente) {
+      const nouveauDebut = debut == null ? new Date() : new Date(debut);
+      if (isNaN(nouveauDebut.getTime())) throw new Error("Heure de début invalide");
+      const finOubliee = finPrecedente == null ? null : new Date(finPrecedente);
+      if (finOubliee && isNaN(finOubliee.getTime())) throw new Error("Heure de fin invalide");
+      const { data, error } = await client().rpc("demarrer_pointage", {
+        p_intervention_id: interventionId,
+        p_employe_id: employeId,
+        p_debut: nouveauDebut.toISOString(),
+        p_fin_precedente: finOubliee ? finOubliee.toISOString() : null,
+      });
+      if (error && /POINTAGE_OUBLIE\|/.test(error.message || "")) {
+        const morceaux = String(error.message).match(/POINTAGE_OUBLIE\|([^|]+)\|([^|\s]+)/);
+        const e = new Error("Un pointage est resté ouvert plus de 12 heures. Indiquez son heure de fin.");
+        e.code = "pointage-oublie";
+        e.debutPrecedent = morceaux ? new Date(morceaux[1]).getTime() : null;
+        e.nouveauDebut = morceaux ? new Date(morceaux[2]).getTime() : nouveauDebut.getTime();
+        throw e;
+      }
       boom(error);
-      await c.from("interventions").update({ statut: "en_cours" }).eq("id", interventionId);
-      return mapPointage(data);
+      const ligne = Array.isArray(data) ? data[0] : data;
+      if (!ligne) throw new Error("Démarrage du pointage refusé");
+      return mapPointage(ligne);
     },
     async terminerPointage(pointageId) {
       const c = client();
@@ -1068,6 +1125,12 @@
       let q = client().from("pointages").select("*");
       if (filtre.employeId) q = q.eq("employe_id", filtre.employeId);
       if (filtre.interventionId) q = q.eq("intervention_id", filtre.interventionId);
+      if (filtre.from) q = q.or("fin.is.null,fin.gt." + new Date(filtre.from + "T00:00:00").toISOString());
+      if (filtre.to) {
+        const fin = new Date(filtre.to + "T00:00:00");
+        fin.setDate(fin.getDate() + 1);
+        q = q.lt("debut", fin.toISOString());
+      }
       const { data, error } = await q;
       boom(error);
       return (data || []).map(mapPointage);

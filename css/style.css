@@ -90,7 +90,8 @@ svg { width: 1em; height: 1em; display: block; }
 .mois-card.actif { border-color: rgba(56,189,248,.4); background: linear-gradient(180deg, var(--panel), var(--bg2)); }
 .mc-nom { font-size: 14px; font-weight: 700; color: var(--mut); }
 .mois-card.actif .mc-nom { color: var(--txt); }
-.mc-nb { font-size: 26px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; min-height: 30px; }
+.mc-nb { font-size: 20px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; min-height: 24px; }
+.mc-count { color: var(--mut); font-size: 11px; }
 .mc-dots { display: flex; gap: 4px; min-height: 8px; }
 
 /* ---------- Barre de date ---------- */

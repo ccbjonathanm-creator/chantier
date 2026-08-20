@@ -80,9 +80,9 @@ test("le module vocal réutilise la dictée et Groq avec un repli local annoncé
 test("la PWA charge atomiquement les nouveaux fichiers du lot 2", () => {
   const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const sw = fs.readFileSync(path.join(root, "sw.js"), "utf8");
-  assert.match(index, /js\/documents\.js\?v=33/);
-  assert.match(index, /js\/modules-gestion\.js\?v=33/);
-  assert.match(sw, /chantier-v33/);
-  assert.match(sw, /js\/documents\.js\?v=33/);
-  assert.match(sw, /js\/modules-gestion\.js\?v=33/);
+  assert.match(index, /js\/documents\.js\?v=35/);
+  assert.match(index, /js\/modules-gestion\.js\?v=35/);
+  assert.match(sw, /chantier-v35/);
+  assert.match(sw, /js\/documents\.js\?v=35/);
+  assert.match(sw, /js\/modules-gestion\.js\?v=35/);
 });

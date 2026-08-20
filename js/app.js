@@ -119,6 +119,21 @@
     if (h <= 0) return m + " min";
     return h + "h" + String(m).padStart(2, "0");
   }
+  function totalPointages(pointages, from, to) {
+    const debut = new Date(from + "T00:00:00").getTime();
+    const [y, m, d] = to.split("-").map(Number);
+    const fin = new Date(y, m - 1, d + 1).getTime();
+    const maintenant = Date.now();
+    return (pointages || []).reduce((total, p) => {
+      const debutPointage = typeof p.debut === "number" ? p.debut : new Date(p.debut).getTime();
+      const finPointage = p.fin == null ? maintenant
+        : (typeof p.fin === "number" ? p.fin : new Date(p.fin).getTime());
+      const a = Math.max(debutPointage, debut);
+      const b = Math.min(finPointage, fin);
+      return total + Math.max(0, b - a);
+    }, 0);
+  }
+  function heuresStr(ms) { return ms > 0 ? dureeStr(ms) : "0h00"; }
   function joursEntre(d1, d2) {
     const a = new Date(d1 + "T00:00:00").getTime();
     const b = new Date(d2 + "T00:00:00").getTime();
@@ -2041,14 +2056,17 @@
     const to = dernierDuMois(state.date);
     const filtre = { from, to };
     if (!patron) filtre.employeId = state.me.id;
-    const inters = await api.listInterventions(filtre);
+    const [inters, pointages] = await Promise.all([
+      api.listInterventions(filtre), api.listPointages(filtre),
+    ]);
+    const heuresMois = totalPointages(pointages, from, to);
 
     const cont = el(`<div class="page"></div>`);
     cont.appendChild(zoomBar());
     const nav = el(`
       <div class="datebar">
         <button class="round" id="prev">&lsaquo;</button>
-        <div class="dateinfo"><b>${moisLabel(state.date)}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} ce mois</span></div>
+        <div class="dateinfo"><b>${moisLabel(state.date)}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} · ${heuresStr(heuresMois)} pointées</span></div>
         <button class="round" id="next">&rsaquo;</button>
       </div>
     `);
@@ -2088,14 +2106,17 @@
     const an = anneeOf(state.date);
     const filtre = { from: an + "-01-01", to: an + "-12-31" };
     if (!patron) filtre.employeId = state.me.id;
-    const inters = await api.listInterventions(filtre);
+    const [inters, pointages] = await Promise.all([
+      api.listInterventions(filtre), api.listPointages(filtre),
+    ]);
+    const heuresAnnee = totalPointages(pointages, filtre.from, filtre.to);
 
     const cont = el(`<div class="page"></div>`);
     cont.appendChild(zoomBar());
     const nav = el(`
       <div class="datebar">
         <button class="round" id="prev">&lsaquo;</button>
-        <div class="dateinfo"><b>${an}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} dans l'année</span></div>
+        <div class="dateinfo"><b>${an}</b><span>${inters.length} chantier${inters.length > 1 ? "s" : ""} · ${heuresStr(heuresAnnee)} pointées</span></div>
         <button class="round" id="next">&rsaquo;</button>
       </div>
     `);
@@ -2108,11 +2129,13 @@
       const debut = ymd(+an, mo, 1);
       const fin = ymd(+an, mo, new Date(+an, mo + 1, 0).getDate());
       const duMois = inters.filter((it) => it.date <= fin && (it.dateFin || it.date) >= debut);
+      const heuresDuMois = totalPointages(pointages, debut, fin);
       const couleurs = [...new Set(duMois.map((it) => couleurEmploye(it.employeId)))].slice(0, 4);
       const carte = el(`
         <button class="mois-card ${duMois.length ? "actif" : ""}">
           <span class="mc-nom">${MOIS_COURT[mo]}</span>
-          <span class="mc-nb">${duMois.length || ""}</span>
+          <span class="mc-nb">${heuresStr(heuresDuMois)}</span>
+          <span class="mc-count">${duMois.length} chantier${duMois.length > 1 ? "s" : ""}</span>
           <span class="mc-dots">${couleurs.map((c) => `<span class="cd" style="background:${c}"></span>`).join("")}</span>
         </button>
       `);
@@ -2555,8 +2578,26 @@
     } else {
       const start = el(`<button class="act-btn go">${long ? "Démarrer ma journée" : "Démarrer"}</button>`);
       start.addEventListener("click", async () => {
-        await api.demarrerPointage(it.id, state.me.id);
-        render();
+        try {
+          await api.demarrerPointage(it.id, state.me.id);
+          render();
+        } catch (e) {
+          if (e && e.code === "pointage-oublie") {
+            const saisie = prompt(
+              "Un pointage est resté ouvert plus de 12 heures. Indiquez son heure de fin (AAAA-MM-JJ HH:MM).",
+              "",
+            );
+            if (saisie == null) return;
+            try {
+              const fin = new Date(String(saisie).trim().replace(" ", "T"));
+              if (isNaN(fin.getTime())) throw new Error("Heure de fin invalide");
+              await api.demarrerPointage(it.id, state.me.id, e.nouveauDebut, fin.getTime());
+              render();
+            } catch (finErreur) { alert(finErreur.message); }
+            return;
+          }
+          alert(e.message);
+        }
       });
       zone.appendChild(start);
     }
