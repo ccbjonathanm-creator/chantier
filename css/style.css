@@ -533,9 +533,18 @@ svg { width: 1em; height: 1em; display: block; }
 .module-card h2 { margin: 0 0 12px; font-size: 17px; }
 .module-card-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .module-card-title span { color: var(--mut); font-size: 13px; }
-.module-form { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)) auto; align-items: end; gap: 10px; }
-.module-form label { margin: 0; font-size: 13px; color: var(--mut); }
-.module-form input { margin-top: 5px; }
+/* Formulaire d'un module (stock, rentabilite, factures fournisseurs).
+   Chaque intitule est EMPILE au-dessus de son champ : sans cela, un <select>
+   restait colle a droite de son intitule (« Emplacement [Depot] ») alors qu'un
+   <input> passait a la ligne, et le formulaire partait en escalier.
+   Les cases s'alignent en HAUT : un raccourci sous un champ (« + Nouveau
+   materiau ») ne doit pas decaler tous les autres. */
+.module-form { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); align-items: start; gap: 12px 10px; }
+.module-form label { display: flex; flex-direction: column; gap: 5px; margin: 0; font-size: 13px; color: var(--mut); }
+.module-form input, .module-form select { width: 100%; margin-top: 0; }
+/* Le bouton qui valide occupe sa propre ligne, a droite : il ne se glisse plus
+   entre deux champs et ne depend plus de leur hauteur. */
+.module-form .primary { grid-column: 1 / -1; justify-self: end; min-width: 190px; }
 .module-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
 .module-kpi { padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 .module-kpi span, .module-kpi strong { display: block; }
@@ -610,4 +619,34 @@ svg { width: 1em; height: 1em; display: block; }
   .primary.compact { width: 100%; }
   .form-grid, .form-grid.three, .reconcile-actions { grid-template-columns: 1fr; }
   .catalog-card { align-items: flex-start; }
+}
+
+/* Ajout rapide sous un champ : c'est un raccourci, pas une action du
+   formulaire. Il ne doit ni occuper une case de la grille, ni ressembler
+   au bouton qui valide la saisie. */
+.lien-ajout {
+  /* Le label est un bloc dont le contenu coule en ligne : sans « block », le
+     raccourci se colle a droite du menu deroulant et l'ecrase sur telephone. */
+  display: block;
+  margin-top: 2px;
+  /* Zone tactile : le texte fait 12 px, mais on vise avec un doigt, parfois
+     ganté, sur un téléphone tenu d'une main. Le rembourrage porte la cible à
+     36 px, et 44 px sur petit écran. */
+  padding: 10px 6px 10px 0;
+  min-height: 36px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  /* Jamais sous 13 px : ce texte se lit dehors, sur un telephone tenu a bout
+     de bras. Un test du lot 5 garde cette regle. */
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  align-self: start;
+}
+.lien-ajout:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .lien-ajout { min-height: 44px; font-size: 14px; }
 }

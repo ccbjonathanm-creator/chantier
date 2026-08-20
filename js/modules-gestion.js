@@ -38,6 +38,13 @@
     const nomArticle = (id) => (articles.find((a) => a.id === id) || {}).label || "Article supprimé";
     const nomEmpl = (id) => (emplacements.find((e) => e.id === id) || {}).libelle || "Emplacement supprimé";
 
+    // On ne stocke pas une PRESTATION. Proposer « Diagnostic » ou « Pose d'une
+    // robinetterie » dans un mouvement de stock permettait d'entrer 5 heures de
+    // main d'oeuvre en magasin et faussait la valeur affichée du stock.
+    // Les articles sans type sont conservés : ce sont d'anciennes saisies, et
+    // les faire disparaitre du stock serait pire que de les laisser.
+    const stockables = articles.filter((a) => a.kind !== "service");
+
     const root = el(`
       <section class="module-page">
         <div class="module-head">
@@ -49,7 +56,10 @@
         <div class="module-card">
           <h2>Enregistrer un mouvement</h2>
           <form class="module-form" data-form>
-            <label>Article<select name="catalogItemId" required>${articles.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("")}</select></label>
+            <label>Article
+              <select name="catalogItemId" required>${stockables.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("")}</select>
+              <button class="lien-ajout" data-nouvel-article type="button">+ Nouveau matériau</button>
+            </label>
             <label>Emplacement<select name="emplacementId" required>${emplacements.map((e) => `<option value="${esc(e.id)}">${esc(e.libelle)}</option>`).join("")}</select></label>
             <label>Nature<select name="type" required>
               <option value="entree">Entrée en stock</option>
@@ -74,9 +84,14 @@
       </section>
     `);
 
-    if (!articles.length || !emplacements.length) {
+    if (!stockables.length || !emplacements.length) {
+      const quoi = !stockables.length && !emplacements.length
+        ? "un matériau et un emplacement"
+        : (!stockables.length ? "un matériau" : "un emplacement de stock");
       root.querySelector("[data-form]").innerHTML =
-        "<p class=\"empty\">Créez d'abord un article de catalogue et un emplacement.</p>";
+        "<p class=\"empty\">Il faut d'abord " + quoi + ". Utilisez le bouton "
+        + "« + Nouveau matériau » ci-dessous, ou l'onglet Catalogue.</p>"
+        + "<button class=\"lien-ajout\" data-nouvel-article type=\"button\">+ Nouveau matériau</button>";
     }
 
     const valeurTotale = niveaux.reduce((s, n) => s + Number(n.valeur), 0);
@@ -120,6 +135,50 @@
         try {
           await api.annulerMouvementStock(b.dataset.annuler, motif, S.moiId ? S.moiId() : null);
           S.rerender();
+        } catch (e) { alert(e.message); }
+      });
+    });
+
+    // Creation d'un materiau sans quitter le stock : quand une livraison arrive
+    // avec une reference inconnue, sortir du module pour aller au catalogue et
+    // revenir faisait quatre navigations, le livreur sur le dos.
+    root.querySelectorAll("[data-nouvel-article]").forEach((bouton) => {
+      bouton.addEventListener("click", async () => {
+        const libelle = (window.prompt("Nom du matériau") || "").trim();
+        if (!libelle) return;
+        const unite = (window.prompt("Unité (u, m, kg, L…)", "u") || "u").trim() || "u";
+        const achat = Number((window.prompt("Prix d'achat HT, en euros", "0") || "0").replace(",", "."));
+        const vente = Number((window.prompt("Prix de vente HT, en euros", String(achat)) || "0").replace(",", "."));
+        if (!(achat >= 0) || !(vente >= 0)) { alert("Les prix doivent être des nombres positifs."); return; }
+        try {
+          const cree = await api.createCatalogItem({
+            categoryId: null,
+            kind: "product",
+            reference: "",
+            label: libelle,
+            description: "",
+            unit: unite,
+            unitPriceExclTax: vente,
+            vatRate: 10,
+            purchasePriceExclTax: achat,
+          });
+          S.rerender();
+          // Le nouvel article est preselectionne : on enchaine sur la quantite.
+          // Le rendu est asynchrone : un delai fixe rate la cible une fois sur
+          // deux, on reessaie donc jusqu'a ce que l'option existe vraiment.
+          const selectionner = (essai) => {
+            const sel = document.querySelector('[data-form] select[name="catalogItemId"]');
+            const trouve = sel && [...sel.options].some((o) => o.value === cree.id);
+            if (trouve) {
+              sel.value = cree.id;
+              sel.dispatchEvent(new Event("change", { bubbles: true }));
+              const q = document.querySelector('[data-form] input[name="quantite"]');
+              if (q) { q.focus(); q.select(); }
+              return;
+            }
+            if (essai < 20) setTimeout(() => selectionner(essai + 1), 60);
+          };
+          selectionner(0);
         } catch (e) { alert(e.message); }
       });
     });
