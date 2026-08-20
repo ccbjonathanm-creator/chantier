@@ -159,7 +159,7 @@
         conditionsPaiement: "Paiement à 30 jours.",
         penalitesRetard: "En cas de retard de paiement, pénalités au taux de 3 fois le taux d'intérêt légal.",
         indemniteRecouvrement: 40,
-        mentionTva: "TVA non applicable, article 293 B du CGI",
+        mentionTva: "TVA applicable selon les taux indiqués sur chaque ligne.",
         // Deux taux DIFFÉRENTS : ce qu'on facture, et ce que ça coûte.
         // La marge vit entre les deux.
         tauxHoraireVente: 45,
@@ -1075,8 +1075,9 @@
       save(db);
       return delay(row);
     },
-    // Le clic humain. C'est seulement ici que la relance part.
-    async envoyerRelance(relanceId, auteurId) {
+    // Le message est envoyé hors de ClicChantier. Cette action ne fait que
+    // consigner la confirmation explicite de l'artisan.
+    async marquerRelanceEnvoyee(relanceId, auteurId) {
       const db = load();
       const r = db.relances.find((x) => x.id === relanceId);
       if (!r) throw new Error("Relance introuvable");
@@ -1088,6 +1089,10 @@
       r.envoyeePar = auteurId || null;
       save(db);
       return delay(r);
+    },
+    // Compatibilité avec l'ancien nom interne. Aucun transport n'est lancé.
+    async envoyerRelance(relanceId, auteurId) {
+      return this.marquerRelanceEnvoyee(relanceId, auteurId);
     },
     // --- Factures fournisseurs (PALIER 7) ---
     // ⛔ Un document importé ne crée JAMAIS de dépense ni de mouvement de

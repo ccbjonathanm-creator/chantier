@@ -893,12 +893,16 @@
       boom(error);
       return mapRelance(data);
     },
-    async envoyerRelance(relanceId, auteurId) {
+    async marquerRelanceEnvoyee(relanceId, auteurId) {
       const { data, error } = await client().from("relances").update({
         statut: "envoyee", envoyee_le: new Date().toISOString(), envoyee_par: auteurId || null,
       }).eq("id", relanceId).select().single();
       boom(error);
       return mapRelance(data);
+    },
+    // Compatibilité avec l'ancien nom interne. Aucun transport n'est lancé.
+    async envoyerRelance(relanceId, auteurId) {
+      return this.marquerRelanceEnvoyee(relanceId, auteurId);
     },
     async annulerRelance(relanceId) {
       const { data, error } = await client().from("relances").update({

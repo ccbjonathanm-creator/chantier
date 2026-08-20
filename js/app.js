@@ -778,6 +778,53 @@
     annulee: { libelle: "Annulée", classe: "lock" },
   };
 
+  function lignesPourDocument(lignes) {
+    return (lignes || []).map((ligne) => ({
+      libelle: ligne.libelle || ligne.libelleSnapshot,
+      description: ligne.description || ligne.descriptionSnapshot,
+      unite: ligne.unite || ligne.uniteSnapshot,
+      quantite: ligne.quantite,
+      prixUnitaireHT: ligne.prixUnitaireHT,
+      tauxTVA: ligne.tauxTVA,
+    }));
+  }
+
+  async function ouvrirDocumentDevis(devis) {
+    const params = await api.getParametresFacturation();
+    window.Chantier.documents.ouvrir({
+      titre: "Devis",
+      numero: window.Chantier.documents.referenceDevis(devis),
+      date: devis.createdAt,
+      objet: devis.titre,
+      vendeur: params.vendeurSnapshot,
+      client: devis.clientSnapshot,
+      lignes: lignesPourDocument(devis.lignes),
+      totalHT: devis.totalHT, totalTVA: devis.totalTVA, totalTTC: devis.totalTTC,
+      conditionsPaiement: params.conditionsPaiement,
+      penalitesRetard: params.penalitesRetard,
+      indemniteRecouvrement: params.indemniteRecouvrement,
+      mentionTva: params.mentionTva,
+    });
+  }
+
+  function ouvrirDocumentFacture(facture) {
+    const estAvoir = facture.genre === "avoir";
+    window.Chantier.documents.ouvrir({
+      titre: estAvoir ? "Avoir" : "Facture",
+      numero: facture.numero || "Brouillon sans numéro",
+      date: facture.dateEmission || facture.createdAt,
+      objet: estAvoir && facture.avoirDe ? "Correction de la facture d'origine" : "",
+      vendeur: facture.vendeurSnapshot,
+      client: facture.clientSnapshot,
+      lignes: lignesPourDocument(facture.lignes),
+      totalHT: facture.totalHT, totalTVA: facture.totalTVA, totalTTC: facture.totalTTC,
+      conditionsPaiement: facture.conditionsPaiement,
+      penalitesRetard: facture.penalitesRetard,
+      indemniteRecouvrement: facture.indemniteRecouvrement,
+      mentionTva: facture.mentionTva,
+    });
+  }
+
   // Déclaration des matériaux posés, depuis le chantier. Accessible à
   // l'employé comme au patron : c'est celui qui pose qui sait.
   async function feuilleMateriaux(intervention) {
@@ -997,18 +1044,35 @@
           zone.innerHTML = `
             <p class="reg-hint">${esc(prop.resume)} <span class="mod-badge ${conf.classe}">${conf.texte}</span></p>
             <p class="reg-hint">${esc(prop.champs[0].motif)}</p>
+            <label>Adresse e-mail du client
+              <input class="rel-email" type="email" autocomplete="email" placeholder="client@exemple.fr" value="${esc(c.client && c.client.email || "")}">
+            </label>
             <textarea rows="7" class="rel-texte"></textarea>
+            <div class="module-warning">ClicChantier n'envoie aucun message automatiquement. Le premier bouton ouvre votre messagerie. Le second enregistre seulement votre confirmation.</div>
             <div class="devis-actions">
-              <button class="primary" data-envoyer type="button">Valider et envoyer</button>
+              <button class="primary" data-ouvrir-mail type="button">Ouvrir dans ma messagerie</button>
+              <button class="ghost2" data-confirmer-envoi type="button">J'ai envoyé ce message</button>
               <button class="ghost2" data-plus type="button">Ne plus relancer</button>
             </div>`;
           zone.querySelector(".rel-texte").value = prop.champs[0].valeur;
 
-          zone.querySelector("[data-envoyer]").addEventListener("click", async () => {
+          zone.querySelector("[data-ouvrir-mail]").addEventListener("click", () => {
             const texte = zone.querySelector(".rel-texte").value;
             try {
+              const destinataire = zone.querySelector(".rel-email").value;
+              const reference = estDevis
+                ? window.Chantier.documents.referenceDevis(c.cible)
+                : (c.cible.numero || "facture");
+              const objet = "Relance " + (estDevis ? "devis " : "facture ") + reference;
+              location.href = window.Chantier.documents.composerMailto(destinataire, objet, texte);
+            } catch (e) { alert(e.message); }
+          });
+          zone.querySelector("[data-confirmer-envoi]").addEventListener("click", async () => {
+            const texte = zone.querySelector(".rel-texte").value;
+            if (!confirm("Confirmez-vous avoir envoyé ce message depuis votre messagerie ?")) return;
+            try {
               const r = await api.preparerRelance(c.type, c.cible.id, c.niveau, texte);
-              await api.envoyerRelance(r.id, state.me.id);
+              await api.marquerRelanceEnvoyee(r.id, state.me.id);
               render();
             } catch (e) { alert(e.message); }
           });
@@ -1181,6 +1245,9 @@
     };
 
     const actions = root.querySelector("#fact-actions");
+    const imprimer = el('<button class="ghost2" type="button">Imprimer / Enregistrer en PDF</button>');
+    imprimer.addEventListener("click", () => ouvrirDocumentFacture(facture));
+    actions.appendChild(imprimer);
     if (facture.statut === "brouillon") {
       const b = el('<button class="primary" type="button">Valider la facture</button>');
       b.addEventListener("click", async () => {
@@ -1512,6 +1579,12 @@
 
     // --- Actions de cycle de vie, chacune est un clic humain explicite.
     const actions = root.querySelector("#devis-actions");
+    const imprimer = el('<button class="ghost2" type="button">Imprimer / Enregistrer en PDF</button>');
+    imprimer.addEventListener("click", async () => {
+      try { await ouvrirDocumentDevis(devis); }
+      catch (e) { alert(e.message); }
+    });
+    actions.appendChild(imprimer);
     const bouton = (libelle, classe, statut, confirmation) => {
       const b = el(`<button class="${classe}" type="button">${esc(libelle)}</button>`);
       b.addEventListener("click", async () => {

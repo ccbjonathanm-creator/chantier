@@ -246,6 +246,9 @@
   // extrait alimente le stock et la facture, ce n'est pas que du texte.
   async function pageCompteRendu() {
     const api = S.api;
+    const ia = S.ia;
+    const microDisponible = !!(ia && ia.dispo && ia.dispo());
+    const iaDisponible = !!(ia && ia.aKey && ia.aKey());
     const [interventions, articles] = await Promise.all([
       api.listInterventions({}), api.listCatalogItems(),
     ]);
@@ -257,11 +260,20 @@
           <p>Racontez votre intervention. L'application en tire une fiche à valider, elle ne décide de rien.</p></div>
         </div>
         <div class="module-card">
+          <div class="module-warning" data-voice-etat>${microDisponible
+            ? "Micro disponible. Vous pouvez dicter ou écrire dans le champ."
+            : "Micro indisponible dans ce navigateur. Le champ texte et la structuration locale restent actifs."}<br>${iaDisponible
+            ? "Mise au propre IA active avec votre clé Groq personnelle."
+            : "Aucune clé Groq : la mise au propre IA est inactive, la structuration locale reste disponible."}</div>
           <div class="module-form">
             <label>Chantier<select data-chantier>${interventions.map((i) => `<option value="${esc(i.id)}">${esc(i.client || "Chantier")} · ${esc(i.date)}</option>`).join("")}</select></label>
             <label>Ce que vous avez fait<textarea data-texte rows="5" placeholder="Ex : j'ai posé 3 robinetteries, passé 4 heures sur place, il faudra repasser pour le joint."></textarea></label>
           </div>
-          <button class="primary" data-analyser type="button">Structurer le compte rendu</button>
+          <div class="devis-actions">
+            <button class="ghost2" data-micro type="button" ${microDisponible ? "" : "disabled"}>${microDisponible ? "Démarrer la dictée" : "Micro indisponible"}</button>
+            <button class="ghost2" data-reformuler type="button" ${iaDisponible ? "" : "disabled"}>Mettre au propre avec l'IA</button>
+            <button class="primary" data-analyser type="button">Structurer localement</button>
+          </div>
         </div>
         <div data-resultat></div>
       </section>
@@ -270,6 +282,59 @@
     if (!interventions.length) {
       root.querySelector("[data-analyser]").disabled = true;
     }
+
+    const texteChamp = root.querySelector("[data-texte]");
+    const etat = root.querySelector("[data-voice-etat]");
+    const micro = root.querySelector("[data-micro]");
+    let dicteur = null;
+    let dicteeActive = false;
+    let texteAvantDictee = "";
+    if (microDisponible) {
+      dicteur = ia.creerDicteur(
+        (final, interim) => {
+          texteChamp.value = [texteAvantDictee, final, interim].filter(Boolean).join(" ").trim();
+        },
+        () => {
+          dicteeActive = false;
+          micro.textContent = "Démarrer la dictée";
+          etat.firstChild.textContent = "Dictée terminée. Relisez le texte avant de le structurer.";
+        },
+        (erreur) => {
+          dicteeActive = false;
+          micro.textContent = "Démarrer la dictée";
+          etat.firstChild.textContent = "Le micro n'a pas pu démarrer (" + erreur + "). Vous pouvez continuer au clavier.";
+        },
+      );
+      micro.addEventListener("click", () => {
+        if (!dicteur) return;
+        if (dicteeActive) {
+          dicteur.arreter();
+          return;
+        }
+        texteAvantDictee = texteChamp.value.trim();
+        dicteeActive = true;
+        micro.textContent = "Arrêter la dictée";
+        dicteur.demarrer();
+      });
+    }
+
+    const reformuler = root.querySelector("[data-reformuler]");
+    if (iaDisponible) reformuler.addEventListener("click", async () => {
+      const brut = texteChamp.value.trim();
+      if (!brut) { alert("Dictez ou saisissez d'abord votre compte rendu."); return; }
+      reformuler.disabled = true;
+      reformuler.textContent = "Mise au propre…";
+      try {
+        const chantier = root.querySelector("[data-chantier]");
+        texteChamp.value = await ia.reformuler(brut, chantier.options[chantier.selectedIndex].textContent);
+        etat.lastChild.textContent = "Mise au propre terminée par Groq. Relisez le texte avant de le structurer.";
+      } catch (e) {
+        alert(e.message === "no-key" ? "Ajoutez votre clé Groq dans les réglages." : "Mise au propre impossible : " + e.message);
+      } finally {
+        reformuler.disabled = false;
+        reformuler.textContent = "Mettre au propre avec l'IA";
+      }
+    });
 
     root.querySelector("[data-analyser]").addEventListener("click", async () => {
       const texte = root.querySelector("[data-texte]").value;
