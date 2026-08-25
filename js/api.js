@@ -180,12 +180,17 @@
           siren: "", vatNumber: "", billingAddressLine1: "24 rue de la République",
           billingAddressLine2: "", billingPostalCode: "71200", billingCity: "Le Creusot",
           billingCountryCode: "FR",
+          // Adresses fictives : elles servent à montrer que la relance se
+          // pré-remplit toute seule. Domaine `.invalid`, réservé par la
+          // norme, donc aucun message ne peut partir vers un vrai inconnu.
+          email: "famille.roux@exemple.invalid", telephone: "06 12 34 56 78",
         },
         {
           id: "client_boulangerie", kind: "company", displayName: "Boulangerie du Centre",
           legalName: "Boulangerie du Centre SARL", siren: "123456789", vatNumber: "FR00123456789",
           billingAddressLine1: "3 place du Marché", billingAddressLine2: "",
           billingPostalCode: "71200", billingCity: "Le Creusot", billingCountryCode: "FR",
+          email: "contact@boulangerie-du-centre.invalid", telephone: "03 85 00 00 00",
         },
       ],
       catalogCategories: [

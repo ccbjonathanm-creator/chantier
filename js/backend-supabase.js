@@ -100,6 +100,8 @@
     return {
       id: c.id, kind: c.kind, displayName: c.display_name, legalName: c.legal_name || "",
       siren: c.siren || "", vatNumber: c.vat_number || "",
+      // Lus par l'ecran de relance pour pre-remplir le destinataire.
+      email: c.email || "", telephone: c.telephone || "",
       billingAddressLine1: c.billing_address_line1 || "", billingAddressLine2: c.billing_address_line2 || "",
       billingPostalCode: c.billing_postal_code || "", billingCity: c.billing_city || "",
       billingCountryCode: c.billing_country_code || "FR",
@@ -109,6 +111,10 @@
     return {
       kind: c.kind, display_name: c.displayName, legal_name: c.legalName || null,
       siren: c.siren || null, vat_number: c.vatNumber || null,
+      // `null` et pas `''` : la contrainte SQL refuse la chaine vide, pour
+      // qu'il n'y ait qu'une seule facon de dire « pas d'adresse ».
+      email: (c.email || "").trim() || null,
+      telephone: (c.telephone || "").trim() || null,
       billing_address_line1: c.billingAddressLine1 || null,
       billing_address_line2: c.billingAddressLine2 || null,
       billing_postal_code: c.billingPostalCode || null, billing_city: c.billingCity || null,

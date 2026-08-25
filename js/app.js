@@ -773,6 +773,7 @@
     const brouillon = !client ? lireBrouillonClient() : null;
     const c = client || Object.assign({
       kind: "individual", displayName: "", legalName: "", siren: "", vatNumber: "",
+      email: "", telephone: "",
       billingAddressLine1: "", billingAddressLine2: "", billingPostalCode: "", billingCity: "",
       billingCountryCode: "FR",
     }, brouillon || {});
@@ -788,6 +789,11 @@
             <label>SIREN<input id="client-siren" inputmode="numeric" value="${esc(c.siren)}"></label>
             <label>N° de TVA<input id="client-vat" value="${esc(c.vatNumber)}"></label>
           </div>
+          <div class="form-grid">
+            <label>Adresse e-mail<input id="client-email" type="email" autocomplete="email" maxlength="320" value="${esc(c.email || "")}" placeholder="client@exemple.fr"></label>
+            <label>Téléphone<input id="client-tel" type="tel" autocomplete="tel" maxlength="40" value="${esc(c.telephone || "")}" placeholder="06 12 34 56 78"></label>
+          </div>
+          <p class="readonly-note">L'adresse e-mail sert à pré-remplir vos relances de devis et de factures. Vous pouvez la compléter plus tard.</p>
           <label>Adresse de facturation<input id="client-address1" value="${esc(c.billingAddressLine1)}"></label>
           <label>Complément d'adresse<input id="client-address2" value="${esc(c.billingAddressLine2)}"></label>
           <div class="form-grid three">
@@ -813,6 +819,8 @@
       legalName: root.querySelector("#client-legal").value.trim(),
       siren: root.querySelector("#client-siren").value.trim(),
       vatNumber: root.querySelector("#client-vat").value.trim(),
+      email: root.querySelector("#client-email").value.trim(),
+      telephone: root.querySelector("#client-tel").value.trim(),
       billingAddressLine1: root.querySelector("#client-address1").value.trim(),
       billingAddressLine2: root.querySelector("#client-address2").value.trim(),
       billingPostalCode: root.querySelector("#client-postal").value.trim(),
@@ -829,6 +837,12 @@
       if (!payload.displayName) return montrerToast("Le nom du client est obligatoire.", "attente");
       if (payload.kind === "company" && !payload.legalName) return montrerToast("La raison sociale est obligatoire pour une entreprise.", "attente");
       if (!/^[A-Z]{2}$/.test(payload.billingCountryCode)) return montrerToast("Le pays doit contenir deux lettres.", "attente");
+      // L'e-mail reste facultatif, mais s'il est saisi il doit pouvoir servir
+      // de destinataire. Meme regle que la contrainte SQL, pour que l'erreur
+      // arrive ici en francais clair plutot qu'en refus de la base.
+      if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
+        return montrerToast("L'adresse e-mail du client n'est pas valide. Laissez le champ vide si vous ne l'avez pas.", "attente");
+      }
       try {
         const saved = client ? await api.updateClient(client.id, payload) : await api.createClient(payload);
         effacerBrouillonClient();
