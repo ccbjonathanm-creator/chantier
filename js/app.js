@@ -95,6 +95,10 @@
     moduleCle: null, // module ouvert dans l'espace Modules
     socleVue: null, // null | clients | client | catalogue | article | rapprochement | devis | devisFiche
     clientId: null,
+    // Enchainement des etapes : quand on arrive sur l'ecran Devis en venant
+    // d'une fiche client, le formulaire s'ouvre deja rempli avec ce client.
+    // Consomme puis remis a null par viewDevis, pour ne pas coller ensuite.
+    devisPourClientId: null,
     catalogItemId: null,
     devisId: null,
     factureId: null,
@@ -802,10 +806,17 @@
             <label>Pays<input id="client-country" maxlength="2" value="${esc(c.billingCountryCode)}"></label>
           </div>
           ${brouillon ? '<p class="module-warning">Brouillon restauré après le rechargement de la page.</p>' : ""}
-          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : `<div class="devis-actions"><button class="primary" type="submit">Enregistrer la fiche</button>${client ? '<button class="danger-text" id="archive-client" type="button">Archiver ce client</button>' : ""}</div>`}
+          ${enLectureSeule() ? '<p class="readonly-note">Consultation en lecture seule.</p>' : `<div class="devis-actions"><button class="primary" type="submit">Enregistrer la fiche</button>${client ? '<button class="ghost2" id="client-vers-devis" type="button">Créer un devis pour ce client</button><button class="danger-text" id="archive-client" type="button">Archiver ce client</button>' : ""}</div>`}
         </form>
       </section>`);
     root.querySelector("#client-back").appendChild(retourSocle("Clients", "clients"));
+    // Enchainement client -> devis : le client suit, on ne le rechoisit pas.
+    const versDevis = root.querySelector("#client-vers-devis");
+    if (versDevis) versDevis.addEventListener("click", () => {
+      state.devisPourClientId = client.id;
+      state.socleVue = "devis";
+      render();
+    });
     const kind = root.querySelector("#client-kind");
     const legalWrap = root.querySelector("#legal-wrap");
     kind.value = c.kind;
@@ -1474,7 +1485,9 @@
       });
     }
 
-    root.querySelector("#devis-nouveau").addEventListener("click", () => {
+    // Extrait en fonction pour pouvoir l'ouvrir soit au clic, soit d'office
+    // quand on arrive depuis la fiche d'un client.
+    const ouvrirFormulaireDevis = (clientPreselect) => {
       if (!clients.length) {
         alert("Créez d'abord une fiche client dans l'écran Clients.");
         return;
@@ -1483,7 +1496,7 @@
         <form class="socle-form" id="devis-form">
           <label>Titre du devis<input name="titre" required placeholder="Rénovation salle de bain"></label>
           <label>Client<select name="clientId" required>${
-            clients.map((c) => `<option value="${esc(c.id)}">${esc(c.displayName)}</option>`).join("")
+            clients.map((c) => `<option value="${esc(c.id)}" ${c.id === clientPreselect ? "selected" : ""}>${esc(c.displayName)}</option>`).join("")
           }</select></label>
           <button class="primary" type="submit">Créer le brouillon</button>
         </form>`);
@@ -1500,8 +1513,20 @@
           render();
         } catch (e) { alert(e.message); }
       });
-      root.querySelector("#devis-nouveau").replaceWith(form);
-    });
+      const bouton = root.querySelector("#devis-nouveau");
+      if (bouton) bouton.replaceWith(form);
+    };
+
+    root.querySelector("#devis-nouveau").addEventListener("click", () => ouvrirFormulaireDevis(null));
+
+    // Arrivee depuis une fiche client : on ouvre le formulaire tout de suite,
+    // le bon client deja selectionne. Le drapeau est consomme immediatement,
+    // sinon il rouvrirait le formulaire a chaque passage sur cet ecran.
+    if (state.devisPourClientId) {
+      const pour = state.devisPourClientId;
+      state.devisPourClientId = null;
+      ouvrirFormulaireDevis(pour);
+    }
 
     return shell(root);
   }
@@ -1760,6 +1785,31 @@
       actions.appendChild(bouton("Le client a accepté", "primary", "accepte"));
       actions.appendChild(bouton("Le client a refusé", "ghost2", "refuse"));
     } else if (devis.statut === "accepte") {
+      // ⭐ Le chantier AVANT la facture. Sans cette etape, la facture ne peut
+      // que recopier le devis : il n'y a ni heures pointees ni matieres
+      // consommees a lire, donc la facturation depuis le reel ne sert a rien.
+      if (!enLectureSeule()) {
+        const versChantier = el('<button class="primary" type="button">Programmer l\'intervention</button>');
+        versChantier.addEventListener("click", async () => {
+          const client = devis.clientId ? await api.getClient(devis.clientId) : null;
+          formIntervention(null, {
+            devisId: devis.id,
+            clientId: devis.clientId || null,
+            client: client ? client.displayName : "",
+            adresse: client
+              ? [client.billingAddressLine1, client.billingPostalCode, client.billingCity]
+                  .filter((x) => x && String(x).trim()).join(", ")
+              : "",
+            tel: client ? (client.telephone || "") : "",
+            description: devis.titre || "",
+            // Une fois le chantier cree, on va le voir dans le planning : le
+            // devis n'a plus rien a montrer, et l'artisan veut verifier sa date.
+            apresEnregistrement: () => { state.socleVue = null; render(); },
+          });
+        });
+        actions.appendChild(versChantier);
+        actions.appendChild(el('<p class="reg-hint">Le chantier reprend le client et l\'adresse du devis. C\'est lui qui portera les heures et les matériaux qui alimenteront la facture.</p>'));
+      }
       if (factureExistante) {
         const ouvrirFacture = el(`<button class="primary" type="button">Ouvrir ${esc(factureExistante.numero || "la facture préparée")}</button>`);
         ouvrirFacture.addEventListener("click", () => {
@@ -1772,7 +1822,8 @@
       } else {
         // Le devis accepté devient une facture. Les lignes sont recopiées,
         // le devis reste intact.
-        const versFacture = el('<button class="primary" type="button">Préparer la facture</button>');
+        // En second et en secondaire : la facture vient APRES le chantier.
+        const versFacture = el('<button class="ghost2" type="button">Préparer la facture</button>');
         versFacture.addEventListener("click", async () => {
           try {
             const facture = await api.creerFactureDepuisDevis(devisId);
@@ -2536,9 +2587,22 @@
   }
 
   // ---------- Formulaire intervention (creer / modifier) ----------
-  function formIntervention(it) {
+  // `prefill` sert aux enchainements : « Programmer l'intervention » depuis un
+  // devis accepte arrive ici avec le client, l'adresse et le telephone deja
+  // remplis, et le devis a rattacher.
+  async function formIntervention(it, prefill) {
     const edition = !!it;
-    const data = it || { date: state.date, heure: "", employeId: "", client: "", adresse: "", tel: "", description: "" };
+    const data = it || Object.assign(
+      { date: state.date, heure: "", employeId: "", client: "", clientId: null, adresse: "", tel: "", description: "" },
+      prefill || {}
+    );
+    // La liste des clients fait de ce champ un vrai rattachement et plus un
+    // texte libre. C'est ce lien qui manquait : sans lui `client_id` restait
+    // vide, et l'ecran Clients devait proposer un rapprochement manuel.
+    let clients = [];
+    try { clients = await api.listClients(); } catch (e) { clients = []; }
+    const optClients = clients
+      .map((c) => `<option value="${esc(c.id)}" ${c.id === data.clientId ? "selected" : ""}>${esc(c.displayName)}</option>`).join("");
     const opts = employesCache.filter((e) => e.role === "employe")
       .map((e) => `<option value="${e.id}" ${e.id === data.employeId ? "selected" : ""}>${esc(e.nom)}</option>`).join("");
     const sheet = el(`
@@ -2549,7 +2613,13 @@
             <button class="x" id="close">&times;</button>
           </div>
           <div class="sheet-body">
-            <label>Client<input id="f-client" type="text" value="${esc(data.client)}" placeholder="Nom du client"></label>
+            <label>Client${clients.length ? `
+              <select id="f-client-id">
+                <option value="">Autre, saisir un nom (dépannage ponctuel)</option>
+                ${optClients}
+              </select>` : ""}
+            </label>
+            <label id="f-client-libre-wrap"${clients.length && data.clientId ? " hidden" : ""}>Nom du client<input id="f-client" type="text" value="${esc(data.client)}" placeholder="Nom du client"></label>
             <label>Adresse<input id="f-adresse" type="text" value="${esc(data.adresse)}" placeholder="Adresse du chantier"></label>
             <label>Téléphone<input id="f-tel" type="tel" value="${esc(data.tel)}" placeholder="06 ..."></label>
             <div class="row2">
@@ -2570,11 +2640,35 @@
     const close = () => sheet.remove();
     sheet.querySelector("#close").addEventListener("click", close);
     sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
+
+    const selClient = sheet.querySelector("#f-client-id");
+    const libreWrap = sheet.querySelector("#f-client-libre-wrap");
+    const champAdresse = sheet.querySelector("#f-adresse");
+    const champTel = sheet.querySelector("#f-tel");
+    if (selClient) {
+      selClient.addEventListener("change", () => {
+        const choisi = clients.find((c) => c.id === selClient.value);
+        libreWrap.hidden = !!choisi;
+        if (!choisi) return;
+        // On ne remplace JAMAIS une adresse deja saisie : le chantier n'est
+        // pas toujours a l'adresse de facturation du client.
+        if (!champAdresse.value.trim()) {
+          champAdresse.value = [choisi.billingAddressLine1, choisi.billingPostalCode, choisi.billingCity]
+            .filter((x) => x && String(x).trim()).join(", ");
+        }
+        if (!champTel.value.trim() && choisi.telephone) champTel.value = choisi.telephone;
+      });
+    }
+
     sheet.querySelector("#save").addEventListener("click", async () => {
       const dDebut = sheet.querySelector("#f-date").value || todayISO();
       const dFin = sheet.querySelector("#f-datefin").value;
+      // Un client choisi dans la liste fait autorite : `clientId` porte le
+      // lien, et `client` garde son nom pour l'affichage du planning.
+      const clientChoisi = selClient ? clients.find((c) => c.id === selClient.value) : null;
       const payload = {
-        client: sheet.querySelector("#f-client").value.trim(),
+        clientId: clientChoisi ? clientChoisi.id : null,
+        client: clientChoisi ? clientChoisi.displayName : sheet.querySelector("#f-client").value.trim(),
         adresse: sheet.querySelector("#f-adresse").value.trim(),
         tel: sheet.querySelector("#f-tel").value.trim(),
         date: dDebut,
@@ -2585,11 +2679,19 @@
       };
       if (!payload.client) { alert("Indiquez au moins le nom du client."); return; }
       if (dFin && dFin < dDebut) { alert("La date de fin doit être après le début."); return; }
-      if (edition) await api.updateIntervention(it.id, payload);
-      else await api.createIntervention(payload);
+      let enregistree;
+      if (edition) enregistree = await api.updateIntervention(it.id, payload);
+      else enregistree = await api.createIntervention(payload);
+      // Rattachement au devis d'origine : c'est ce lien qui permettra plus
+      // tard de facturer depuis le reel, heures pointees et stock consomme.
+      if (!edition && prefill && prefill.devisId && enregistree && api.rattacherChantierAuDevis) {
+        try { await api.rattacherChantierAuDevis(enregistree.id, prefill.devisId); }
+        catch (e) { montrerToast("Chantier créé, mais non rattaché au devis : " + e.message, "attente"); }
+      }
       state.date = payload.date;
       close();
-      render();
+      if (prefill && prefill.apresEnregistrement) prefill.apresEnregistrement(enregistree);
+      else render();
     });
     if (edition) {
       sheet.querySelector("#del").addEventListener("click", async () => {

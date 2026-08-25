@@ -1,3 +1,9 @@
+/* Un element marque `hidden` doit VRAIMENT disparaitre. Sans cette regle,
+   toute classe posant un `display` (ici `.sheet-body label { display:flex }`)
+   ecrase la valeur par defaut du navigateur et le champ « masque » reste
+   affiche. Defaut deja rencontre ailleurs, on le ferme une fois pour toutes. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #0b1220;
   --bg2: #0e1a2e;
