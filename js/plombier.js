@@ -79,92 +79,7 @@
     building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/></svg>',
   };
 
-  // ---------- Stockage (async, pret pour le cloud) ----------
-  // En mode demo tout vit dans localStorage. Le jour ou on branche Supabase,
-  // on remplace le corps de ces fonctions par des appels a l'API cloud.
-  const K_INFOS = "chantier_docs_infos_v1";
-  const K_CONTRATS = "chantier_contrats_v1";
-  const K_CATALOGUE = "chantier_catalogue_v1";
-
-  const CORRECTIONS_TEXTE_DEMO = [
-    ["Vos outils metier", "Vos outils métier"], ["Entretiens a prevoir", "Entretiens à prévoir"],
-    ["Chaudiere", "Chaudière"], ["Pompe a chaleur", "Pompe à chaleur"],
-    ["Copropriete", "Copropriété"], ["Republique", "République"], ["Marche", "Marché"],
-    ["Lefevre", "Lefèvre"], ["electrique", "électrique"], ["Deplacement", "Déplacement"],
-    ["Debouchage", "Débouchage"], ["Desembouage", "Désembouage"],
-    ["securite", "sécurité"], ["Detartrage", "Détartrage"], ["unite", "unité"],
-  ];
-  function corrigerTexteDemo(valeur) {
-    if (typeof valeur === "string") {
-      CORRECTIONS_TEXTE_DEMO.forEach(([avant, apres]) => { valeur = valeur.split(avant).join(apres); });
-      return valeur;
-    }
-    if (Array.isArray(valeur)) return valeur.map(corrigerTexteDemo);
-    if (valeur && typeof valeur === "object") {
-      Object.keys(valeur).forEach((cle) => { valeur[cle] = corrigerTexteDemo(valeur[cle]); });
-    }
-    return valeur;
-  }
-  function lire(cle, repli) {
-    try {
-      const r = localStorage.getItem(cle);
-      if (!r) return repli;
-      const valeur = corrigerTexteDemo(JSON.parse(r));
-      const corrige = JSON.stringify(valeur);
-      if (corrige !== r) localStorage.setItem(cle, corrige);
-      return valeur;
-    } catch (e) { return repli; }
-  }
-  function ecrire(cle, val) {
-    try { localStorage.setItem(cle, JSON.stringify(val)); } catch (e) {}
-  }
-
-  const store = {
-    async infos() {
-      let i = lire(K_INFOS, null);
-      if (i === null) { i = { ...INFOS_DEFAUT }; ecrire(K_INFOS, i); }
-      return i;
-    },
-    async setInfos(data) { ecrire(K_INFOS, data); return data; },
-
-    async contrats() {
-      let list = lire(K_CONTRATS, null);
-      if (list === null) { list = contratsDefaut(); ecrire(K_CONTRATS, list); }
-      return list;
-    },
-    async saveContrat(c) {
-      const list = lire(K_CONTRATS, []);
-      if (c.id) {
-        const i = list.findIndex((x) => x.id === c.id);
-        if (i >= 0) list[i] = c; else list.push(c);
-      } else { c.id = uid(); list.push(c); }
-      ecrire(K_CONTRATS, list);
-      return c;
-    },
-    async deleteContrat(id) {
-      ecrire(K_CONTRATS, lire(K_CONTRATS, []).filter((x) => x.id !== id));
-      return true;
-    },
-
-    async catalogue() {
-      let list = lire(K_CATALOGUE, null);
-      if (list === null) { list = CATALOGUE_DEFAUT.map((p) => ({ ...p, id: uid() })); ecrire(K_CATALOGUE, list); }
-      return list;
-    },
-    async savePresta(p) {
-      const list = await this.catalogue();
-      if (p.id) {
-        const i = list.findIndex((x) => x.id === p.id);
-        if (i >= 0) list[i] = p; else list.push(p);
-      } else { p.id = uid(); list.push(p); }
-      ecrire(K_CATALOGUE, list);
-      return p;
-    },
-    async deletePresta(id) {
-      ecrire(K_CATALOGUE, (await this.catalogue()).filter((x) => x.id !== id));
-      return true;
-    },
-  };
+  const store = window.Chantier.packStore.creer("plombier", () => INFOS_DEFAUT, () => CATALOGUE_DEFAUT, () => contratsDefaut());
 
   // Catalogue de prestations plomberie / chauffage pre-rempli (tarifs HT indicatifs).
   const CATALOGUE_DEFAUT = [
@@ -220,6 +135,7 @@
 
   // ---------- Etat interne du module ----------
   const pstate = { section: "accueil" };
+  function infosAction(action) { return store.infos().then(action).catch((e) => toast(e.message || "Chargement impossible. Réessayez.")); }
   function go(section) { pstate.section = section; S.rerender(); }
   function repaint() { S.rerender(); } // reconstruit via app.render -> page()
 
@@ -388,7 +304,7 @@
     if (!quand) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(quand)) { toast("Date invalide (format AAAA-MM-JJ)."); return; }
     c.dateDernier = quand;
-    await store.saveContrat(c);
+    try { await store.saveContrat(c); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
     toast("Entretien enregistré. Prochaine échéance mise à jour.");
     repaint();
   }
@@ -441,14 +357,14 @@
         notes: sheet.querySelector("#c-notes").value.trim(),
       };
       if (!nc.client) { toast("Indiquez au moins le nom du client."); return; }
-      await store.saveContrat(nc);
+      try { await store.saveContrat(nc); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
       close();
       repaint();
     });
     if (edition) {
       sheet.querySelector("#del").addEventListener("click", async () => {
         if (!confirm("Supprimer ce contrat d'entretien ?")) return;
-        await store.deleteContrat(c.id);
+        try { await store.deleteContrat(c.id); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         close();
         repaint();
       });
@@ -479,7 +395,7 @@
       row.querySelector('[data-a="edit"]').addEventListener("click", () => formPresta(p));
       row.querySelector('[data-a="del"]').addEventListener("click", async () => {
         if (!confirm("Supprimer cette prestation du catalogue ?")) return;
-        await store.deletePresta(p.id);
+        try { await store.deletePresta(p.id); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         repaint();
       });
       box.appendChild(row);
@@ -521,7 +437,7 @@
         prixHT: parseFloat(sheet.querySelector("#p-prix").value) || 0,
       };
       if (!np.libelle) { toast("Indiquez un libelle."); return; }
-      await store.savePresta(np);
+      try { await store.savePresta(np); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
       close();
       repaint();
     });
@@ -546,7 +462,7 @@
   }
 
   function formInfos() {
-    store.infos().then((infos) => {
+    infosAction((infos) => {
       const d = infos || { raisonSociale: "", siret: "", adresse: "", tel: "", email: "", assureur: "", assurancePolice: "", tvaIntra: "" };
       const sheet = el(`
         <div class="modal">
@@ -585,7 +501,7 @@
           tvaIntra: sheet.querySelector("#i-tva").value.trim(),
         };
         if (!nd.raisonSociale) { toast("Indiquez au moins la raison sociale."); return; }
-        await store.setInfos(nd);
+        try { await store.setInfos(nd); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         close();
         repaint();
         toast("Infos entreprise enregistrées.");
@@ -661,7 +577,7 @@
       if (!sigTech && infos.signatureTech) sigTech = infos.signatureTech; // reutilise la signature enregistree
       if (padTech.dataURL() && sheet.querySelector("#sig-tech-save").checked) {
         infos.signatureTech = padTech.dataURL();
-        await store.setInfos(infos);
+        try { await store.setInfos(infos); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
       }
       const data = {
         infos,
@@ -919,7 +835,7 @@
   }
 
   function formAttestationTVA() {
-    store.infos().then((infos) => {
+    infosAction((infos) => {
       if (!infos || !infos.raisonSociale) { toast("Renseignez d'abord les infos de votre entreprise."); formInfos(); return; }
       const sigEnregistree = !!infos.signatureTech;
       const sheet = el(`
@@ -976,7 +892,7 @@
         if (!sigEnt && infos.signatureTech) sigEnt = infos.signatureTech;
         if (padEnt.dataURL() && sheet.querySelector("#sig-tva-ent-save").checked) {
           infos.signatureTech = padEnt.dataURL();
-          await store.setInfos(infos);
+          try { await store.setInfos(infos); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         }
         close();
         const data = {

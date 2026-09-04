@@ -7,15 +7,19 @@
 (function () {
   "use strict";
 
-  const KEY_STORE = "chantier_ia_key";
+  function keyStore() {
+    const api = window.Chantier.api;
+    const profil = api.getSession();
+    return "chantier_ia_key:" + (api.estCloud ? "cloud:" : "demo:") + (profil && profil.id || "anonyme");
+  }
   const MODELE = "llama-3.3-70b-versatile";
 
   function getKey() {
-    try { return localStorage.getItem(KEY_STORE) || ""; } catch (e) { return ""; }
+    try { return localStorage.getItem(keyStore()) || ""; } catch (e) { return ""; }
   }
   function setKey(k) {
-    if (k) localStorage.setItem(KEY_STORE, k.trim());
-    else localStorage.removeItem(KEY_STORE);
+    if (k) localStorage.setItem(keyStore(), k.trim());
+    else localStorage.removeItem(keyStore());
   }
   function aKey() { return !!getKey(); }
 

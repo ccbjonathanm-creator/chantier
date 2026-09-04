@@ -688,3 +688,7 @@ svg { width: 1em; height: 1em; display: block; }
 }
 .acces-pied { margin: 0; color: var(--mut); font-size: 13px; text-align: center; }
 .acces-pied a { color: var(--accent); }
+
+.ec-form label { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; min-width: 0; }
+.ec-form input, .ec-form select { width: 100%; box-sizing: border-box; min-height: 44px; border: 1px solid var(--bord, #28455f); border-radius: 10px; background: #0c1929; color: #edf5ff; padding: 10px 12px; font: inherit; }
+.ec-form input:focus, .ec-form select:focus { outline: 2px solid #42d7ff; outline-offset: 2px; }

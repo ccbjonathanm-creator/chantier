@@ -219,6 +219,7 @@
     if (!Array.isArray(db.clients)) db.clients = exemple.clients;
     if (!Array.isArray(db.catalogCategories)) db.catalogCategories = exemple.catalogCategories;
     if (!Array.isArray(db.catalogItems)) db.catalogItems = exemple.catalogItems;
+    db.catalogItems.forEach(a => { if (a.kind === "product") a.kind = "material"; });
     if (!Array.isArray(db.devis)) db.devis = [];
     if (!Array.isArray(db.devisLignes)) db.devisLignes = [];
     if (!Array.isArray(db.factures)) db.factures = [];
@@ -242,7 +243,8 @@
     if (!db.parametresFacturation) {
       db.parametresFacturation = {
         vendeurSnapshot: {
-          nom: "Plomberie Martin", siret: "", adresse: "", codePostal: "", ville: "",
+          nom: "Plomberie Martin — DÉMONSTRATION", siret: "00000000000000",
+          adresse: "1 rue de la Démonstration", codePostal: "71200", ville: "Le Creusot",
         },
         conditionsPaiement: "Paiement à 30 jours.",
         penalitesRetard: "En cas de retard de paiement, pénalités au taux de 3 fois le taux d'intérêt légal.",
@@ -426,7 +428,7 @@
   // v2 (2026-08-20) : la main d'oeuvre du devis Roux est passée de 12 h à
   // 120 €/h (incohérent avec le taux horaire de l'entreprise, l'écart
   // devis/réel affichait -533,90 €) à 20 h au taux réel de 45 €/h.
-  const AMORCAGE_VERSION = 2;
+  const AMORCAGE_VERSION = 3;
 
   async function amorcerGestionDemo(api) {
     let db = load();
@@ -598,6 +600,32 @@
     }
   }
 
+  function validerLigne(ligne, db) {
+    if (!ligne || !String(ligne.libelle || "").trim()) throw new Error("Le libellé de la ligne est obligatoire");
+    const q = Number(ligne.quantite), p = Number(ligne.prixUnitaireHT);
+    if (!Number.isFinite(q) || q <= 0) throw new Error("La quantité doit être finie et supérieure à zéro");
+    if (!Number.isFinite(p) || p < 0) throw new Error("Le prix doit être fini et positif ou nul");
+    if (![0, 5.5, 10, 20].includes(Number(ligne.tauxTVA))) throw new Error("Taux de TVA non autorisé");
+    if (ligne.catalogItemId && !db.catalogItems.some(i => i.id === ligne.catalogItemId)) throw new Error("Article de catalogue introuvable");
+  }
+  function validerClient(data) {
+    if (!String(data.displayName || "").trim()) throw new Error("Le nom du client est obligatoire");
+    if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) throw new Error("Adresse e-mail invalide");
+  }
+  function validerArticle(data) {
+    if (!String(data.label || "").trim()) throw new Error("Le libellé est obligatoire");
+    for (const cle of ["unitPriceExclTax", "purchasePriceExclTax"]) {
+      if (data[cle] != null && (!Number.isFinite(Number(data[cle])) || Number(data[cle]) < 0)) throw new Error("Prix de catalogue invalide");
+    }
+  }
+  function verifierVendeur(v) {
+    const manquants = [];
+    if (!v || !String(v.nom || "").trim()) manquants.push("nom du vendeur");
+    if (!v || !/^\d{14}$/.test(String(v.siret || "").replace(/\s/g, ""))) manquants.push("SIRET (14 chiffres)");
+    if (!v || !String(v.adresse || "").trim() || !String(v.codePostal || "").trim() || !String(v.ville || "").trim()) manquants.push("adresse complète du vendeur");
+    if (manquants.length) throw new Error("Document incomplet : " + manquants.join(", ") + ". Complétez les paramètres puis actualisez le brouillon.");
+  }
+
   const DemoBackend = {
     // Demarrage : rien de special en demo (les donnees sont locales).
     async init() { await amorcerGestionDemo(this); return true; },
@@ -635,6 +663,7 @@
       return delay(db.clients.find((c) => c.id === id && !c.archivedAt) || null);
     },
     async createClient(data) {
+      validerClient(data);
       const db = load();
       const row = Object.assign({ id: uid(), archivedAt: null }, data);
       db.clients.push(row);
@@ -645,6 +674,7 @@
       const db = load();
       const row = db.clients.find((c) => c.id === id);
       if (!row) throw new Error("Client introuvable");
+      validerClient({ ...row, ...patch });
       Object.assign(row, patch);
       save(db);
       return delay(row);
@@ -689,8 +719,10 @@
       return delay(db.catalogItems.find((i) => i.id === id && !i.archivedAt) || null);
     },
     async createCatalogItem(data) {
+      validerArticle(data);
       const db = load();
       const row = Object.assign({ id: uid(), archivedAt: null }, data);
+      if (row.kind === "product") row.kind = "material";
       db.catalogItems.push(row);
       save(db);
       return delay(row);
@@ -699,7 +731,9 @@
       const db = load();
       const row = db.catalogItems.find((i) => i.id === id);
       if (!row) throw new Error("Article de catalogue introuvable");
+      validerArticle({ ...row, ...patch });
       Object.assign(row, patch);
+      if (row.kind === "product") row.kind = "material";
       save(db);
       return delay(row);
     },
@@ -766,6 +800,7 @@
     },
     async addDevisLigne(devisId, ligne) {
       const db = load();
+      validerLigne(ligne, db);
       const d = db.devis.find((x) => x.id === devisId);
       if (!d) throw new Error("Devis introuvable");
       if (d.statut !== "brouillon") throw new Error("Devis non modifiable : il est au statut " + d.statut);
@@ -940,6 +975,7 @@
     },
     async addFactureLigne(factureId, ligne) {
       const db = load();
+      validerLigne(ligne, db);
       const f = db.factures.find((x) => x.id === factureId);
       if (!f) throw new Error("Facture introuvable");
       if (f.statut !== "brouillon") throw new Error("Facture non modifiable : elle est au statut " + f.statut);
@@ -985,6 +1021,7 @@
         throw new Error("Transition de facture interdite : " + f.statut + " vers " + statut);
       }
       if (statut === "valide") {
+        if (f.genre !== "avoir") { f.vendeurSnapshot = Object.assign({}, db.parametresFacturation.vendeurSnapshot); verifierVendeur(f.vendeurSnapshot); }
         if (!db.factureLignes.some((l) => l.factureId === factureId)) {
           throw new Error("Une facture vide ne peut pas être validée");
         }
@@ -1016,6 +1053,7 @@
       if (!String(f.clientSnapshot && f.clientSnapshot.nom || "").trim()) {
         throw new Error("Identité du client manquante");
       }
+      if (f.genre !== "avoir") verifierVendeur(f.vendeurSnapshot);
       // Mentions B2B obligatoires (article L441-10 du code de commerce).
       if (f.clientSnapshot.kind === "company"
           && (!String(f.penalitesRetard || "").trim() || Number(f.indemniteRecouvrement) !== 40)) {
@@ -1494,7 +1532,7 @@
       const parArticle = {};
       db.stockMouvements.forEach((m) => {
         if (ids.indexOf(m.interventionId) === -1) return;
-        if (m.type !== "consommation" && m.type !== "retour") return;
+        if (m.type !== "consommation" && m.type !== "retour" && !(m.compenseId && db.stockMouvements.some(o => o.id === m.compenseId && ["consommation", "retour"].includes(o.type)))) return;
         // Consommation négative, retour positif : l'opposé donne le net posé.
         const net = -Number(m.quantite);
         if (!parArticle[m.catalogItemId]) {
@@ -1579,7 +1617,7 @@
 
         // Un MATERIAU prevu au devis mais jamais sorti du stock ne se facture
         // pas : il n'a pas ete pose. On le signale au lieu de le facturer.
-        if (article && article.kind === "product") {
+        if (article && ["product", "material"].includes(article.kind)) {
           prevusNonPoses.push(article.label || l.libelleSnapshot);
           return;
         }
@@ -1613,7 +1651,7 @@
           montant: ecartHT,
         });
       }
-      if (reel.heuresReelles === 0 && !reel.materiaux.length) {
+      if (!lignes.length) {
         ecarts.push({
           type: "vide",
           libelle: "Aucune heure pointée ni matériau consommé sur ce chantier. Rien à facturer depuis le réel.",
@@ -1677,6 +1715,7 @@
       if (db.factures.some((f) => f.devisId === devisId && f.genre !== "avoir" && f.statut !== "annulee")) {
         throw new Error("Une facture existe déjà pour ce devis");
       }
+      lignesValidees.forEach(l => validerLigne(l, db));
       const client = db.clients.find((c) => c.id === devis.clientId);
       if (!client) throw new Error("Client introuvable");
       const p = db.parametresFacturation;
@@ -1697,13 +1736,10 @@
         createdAt: new Date().toISOString(),
       };
       db.factures.push(facture);
+      lignesValidees.forEach((l, i) => db.factureLignes.push({ id: uid(), factureId: facture.id, catalogItemId: l.catalogItemId || null, position: i + 1, libelleSnapshot: l.libelle.trim(), descriptionSnapshot: l.description || "", uniteSnapshot: l.unite || "u", quantite: Number(l.quantite), prixUnitaireHT: Number(l.prixUnitaireHT), tauxTVA: Number(l.tauxTVA) }));
+      recalculerTotauxFacture(db, facture.id);
       save(db);
-
-      for (let i = 0; i < lignesValidees.length; i += 1) {
-        await this.addFactureLigne(facture.id, lignesValidees[i]);
-      }
-      const complet = load();
-      return delay(complet.factures.find((f) => f.id === facture.id));
+      return delay(facture);
     },
 
     // --- Stock réel (PALIER 4) ---
@@ -1759,7 +1795,10 @@
       if (TYPES.indexOf(type) === -1) throw new Error("Type de mouvement inconnu");
 
       const quantite = Number(mvt.quantite);
-      if (!quantite) throw new Error("La quantité ne peut pas être nulle");
+      if (!Number.isFinite(quantite) || !quantite) throw new Error("La quantité doit être finie et non nulle");
+      if (mvt.prixUnitaire != null && (!Number.isFinite(Number(mvt.prixUnitaire)) || Number(mvt.prixUnitaire) < 0)) throw new Error("Prix de stock invalide");
+      const utilisateur = this.getSession();
+      if (utilisateur && utilisateur.role !== "patron" && (!["consommation", "retour"].includes(type) || !db.interventions.some(i => i.id === mvt.interventionId && i.employeId === utilisateur.id) || mvt.compenseId)) throw new Error("Cette opération de stock est réservée au patron");
       if (type === "entree" && quantite <= 0) throw new Error("Une entrée doit être positive");
       if (type === "consommation" && quantite >= 0) throw new Error("Une consommation doit être négative");
       if (type === "retour" && quantite <= 0) throw new Error("Un retour doit être positif");
@@ -1791,6 +1830,7 @@
         if (mvt.catalogItemId !== origine.catalogItemId || mvt.emplacementId !== origine.emplacementId) {
           throw new Error("La compensation doit porter sur le même article et le même emplacement");
         }
+        if ((mvt.interventionId || null) !== (origine.interventionId || null) || Number(mvt.prixUnitaire) !== Number(origine.prixUnitaire)) throw new Error("La compensation doit conserver le chantier et le coût d'origine");
       }
 
       const row = {
@@ -1954,6 +1994,8 @@
     // qui a oublié de pointer en arrivant sur le chantier.
     async demarrerPointage(interventionId, employeId, debut, finPrecedente) {
       const db = load();
+      if (!db.interventions.some(i => i.id === interventionId)) throw new Error("Chantier introuvable");
+      if (!db.employes.some(e => e.id === employeId)) throw new Error("Employé introuvable");
       const quand = debut == null ? Date.now() : new Date(debut).getTime();
       if (isNaN(quand)) throw new Error("Heure de début invalide");
       if (quand > Date.now()) throw new Error("Un pointage ne commence pas dans le futur");
@@ -1992,6 +2034,7 @@
       const db = load();
       const p = db.pointages.find((x) => x.id === pointageId);
       if (!p) throw new Error("Pointage introuvable");
+      if (p.fin != null) return delay(p);
       p.fin = Date.now();
       const it = db.interventions.find((i) => i.id === p.interventionId);
       if (it) {
@@ -2018,6 +2061,7 @@
 
     // Utilitaire demo : remise a zero
     async resetDemo() {
+      if (window.Chantier.securiteSession) window.Chantier.securiteSession.purgerDemo();
       const fresh = seed();
       save(fresh);
       await amorcerGestionDemo(this);
@@ -2074,5 +2118,5 @@
   window.Chantier.backends.demo = DemoBackend;
   // Par defaut on reste en demo ; app.js choisira le backend au demarrage.
   if (!window.Chantier.api) window.Chantier.api = DemoBackend;
-  window.Chantier.util = { uid, todayISO };
+  window.Chantier.util = { uid, todayISO, verifierVendeur };
 })();

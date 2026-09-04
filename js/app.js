@@ -4,10 +4,15 @@
  */
 (function () {
   "use strict";
+  if (window.ChantierCadreInterdit) return;
 
   // Choix du backend : "demo" (local) ou "supabase" (cloud), memorise sur l'appareil.
   const BACKEND_KEY = "chantier_backend";
   function backendChoisi() {
+    if (/(?:type=recovery|error_code=otp_expired|recuperation=1|entreprise=1)/.test((location.hash || "") + (location.search || ""))) {
+      try { localStorage.setItem(BACKEND_KEY, "supabase"); } catch (_) {}
+      return "supabase";
+    }
     try { return localStorage.getItem(BACKEND_KEY) || "demo"; } catch (e) { return "demo"; }
   }
   const backends = window.Chantier.backends || {};
@@ -16,13 +21,14 @@
   const { todayISO } = window.Chantier.util;
   const app = document.getElementById("app");
   const CLIENT_DRAFT_KEY = "clicchantier_brouillon_client_v1";
+  function cleBrouillonClient() { const u = api.getSession(); return CLIENT_DRAFT_KEY + ":" + (api.estCloud ? "cloud" : "demo") + ":" + (u && u.id || "anonyme"); }
 
   function lireBrouillonClient() {
-    try { return JSON.parse(sessionStorage.getItem(CLIENT_DRAFT_KEY) || "null"); }
+    try { return JSON.parse(sessionStorage.getItem(cleBrouillonClient()) || "null"); }
     catch (e) { return null; }
   }
   function effacerBrouillonClient() {
-    try { sessionStorage.removeItem(CLIENT_DRAFT_KEY); } catch (e) {}
+    try { sessionStorage.removeItem(cleBrouillonClient()); } catch (e) {}
   }
 
   // Mode LECTURE SEULE : abonnement ferme (essai expire, past_due, impaye,
@@ -265,6 +271,7 @@
   }
 
   async function renderLoginCloud() {
+    if (api.recuperationEnCours && api.recuperationEnCours()) return renderNouveauMotDePasse();
     let mode = "connexion"; // connexion | creer | rejoindre
     app.innerHTML = "";
 
@@ -292,7 +299,8 @@
       return `
         ${champ("f-email", "Email", "email", "vous@exemple.fr")}
         ${champ("f-pass", "Mot de passe", "password", "")}
-        <button class="primary block" id="go">Se connecter</button>`;
+        <button class="primary block" id="go">Se connecter</button>
+        <button class="ghost-btn" id="mot-de-passe-oublie" type="button">Mot de passe oublié ?</button>`;
     }
 
     function dessiner() {
@@ -322,6 +330,8 @@
       brancherModeSwitch(wrap, true);
       const err = wrap.querySelector("#err");
       const go = wrap.querySelector("#go");
+      const oublie = wrap.querySelector("#mot-de-passe-oublie");
+      if (oublie) oublie.addEventListener("click", () => renderDemandeRecuperation(wrap.querySelector("#f-email").value));
       const val = (id) => { const n = wrap.querySelector("#" + id); return n ? n.value.trim() : ""; };
 
       go.addEventListener("click", async () => {
@@ -373,6 +383,32 @@
       app.appendChild(wrap);
     }
     dessiner();
+  }
+
+  function renderDemandeRecuperation(email) {
+    const wrap = el('<div class="login"><div class="login-card"><h1>Mot de passe oublié</h1><p>Recevez un lien pour choisir un nouveau mot de passe.</p><form><label>Adresse e-mail<input type="email" required autocomplete="email"></label><button class="primary block" type="submit">Recevoir le lien</button></form><p role="status"></p><button class="ghost-btn" type="button">Retour à la connexion</button></div></div>');
+    const input = wrap.querySelector('input'), form = wrap.querySelector('form'), msg = wrap.querySelector('[role="status"]'); input.value = email || '';
+    form.addEventListener('submit', async e => { e.preventDefault(); const button = form.querySelector('button'); button.disabled = true;
+      try { await api.demanderRecuperation(input.value); msg.textContent = "Si un compte correspond à cette adresse, vous recevrez un lien de récupération. Vérifiez aussi les courriers indésirables."; }
+      catch (err) { msg.textContent = err.message; button.disabled = false; }
+    });
+    wrap.querySelector('.ghost-btn').addEventListener('click', renderLoginCloud);
+    app.replaceChildren(wrap); input.focus();
+  }
+  function renderNouveauMotDePasse() {
+    if (app.querySelector('[data-recuperation]')) return;
+    arreterSync(); state.me = null;
+    const wrap = el('<div class="login"><div class="login-card"><h1>Nouveau mot de passe</h1><form><label>Nouveau mot de passe<input name="password" type="password" required minlength="12" autocomplete="new-password"></label><label>Confirmez le mot de passe<input name="confirmation" type="password" required minlength="12" autocomplete="new-password"></label><p>Au moins 12 caractères.</p><button class="primary block" type="submit">Enregistrer le mot de passe</button></form><p role="status"></p><button class="ghost-btn" type="button">Annuler</button></div></div>');
+    wrap.setAttribute('data-recuperation', '');
+    const form = wrap.querySelector('form'), msg = wrap.querySelector('[role="status"]');
+    form.addEventListener('submit', async e => { e.preventDefault(); const button = form.querySelector('button');
+      if (form.elements.password.value !== form.elements.confirmation.value) { msg.textContent = "Les mots de passe sont différents."; return; }
+      button.disabled = true;
+      try { await api.definirMotDePasse(form.elements.password.value); history.replaceState(null, '', location.pathname); await renderLoginCloud(); montrerToast("Mot de passe enregistré. Connectez-vous avec le nouveau mot de passe.", "ok"); }
+      catch (err) { msg.textContent = err.message; button.disabled = false; }
+    });
+    wrap.querySelector('.ghost-btn').addEventListener('click', async () => { await api.setSession(null); history.replaceState(null, '', location.pathname); location.reload(); });
+    app.replaceChildren(wrap); form.elements.password.focus();
   }
 
   // ---------- Connexion DEMO (on choisit qui on est) ----------
@@ -528,11 +564,12 @@
       });
       tabbar.appendChild(t);
     });
-    root.querySelector("#logout").addEventListener("click", () => {
-      arreterSync();
-      api.setSession(null);
-      state.me = null;
-      renderLogin();
+    root.querySelector("#logout").addEventListener("click", async () => {
+      arreterSync(); effacerBrouillonClient();
+      state.me = null; state.moduleCle = null; state.socleVue = null;
+      state.clientId = null; state.devisId = null; state.factureId = null; employesCache = [];
+      try { await api.setSession(null); location.reload(); }
+      catch (e) { renderLogin(); montrerToast(e.message, "attente"); }
     });
     root.querySelector("#reglages").addEventListener("click", sheetReglages);
     app.appendChild(root);
@@ -839,7 +876,7 @@
       billingCountryCode: (root.querySelector("#client-country").value.trim() || "FR").toUpperCase(),
     });
     if (!client) clientForm.addEventListener("input", () => {
-      try { sessionStorage.setItem(CLIENT_DRAFT_KEY, JSON.stringify(payloadClient())); } catch (e) {}
+      try { sessionStorage.setItem(cleBrouillonClient(), JSON.stringify(payloadClient())); } catch (e) {}
     });
     clientForm.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -950,14 +987,15 @@
   // Déclaration des matériaux posés, depuis le chantier. Accessible à
   // l'employé comme au patron : c'est celui qui pose qui sait.
   async function feuilleMateriaux(intervention) {
-    const [articles, emplacements, mouvements] = await Promise.all([
+    const [catalogue, emplacements, mouvements] = await Promise.all([
       api.listCatalogItems(), api.listEmplacements(),
       api.listMouvementsStock({ interventionId: intervention.id }),
     ]);
+    const articles = catalogue.filter(a => a.kind !== 'service');
     const nomArticle = (id) => (articles.find((a) => a.id === id) || {}).label || "Article";
 
     const sheet = el(`
-      <div class="sheet-back">
+      <div class="modal">
         <div class="sheet">
           <div class="sheet-head"><h2>Matériaux posés</h2><button class="x" id="close">&times;</button></div>
           <div class="sheet-body">
@@ -965,7 +1003,8 @@
             <form class="socle-form" id="mat-form">
               <label>Article<select name="catalogItemId" required>${articles.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("")}</select></label>
               <label>Emplacement d'où il sort<select name="emplacementId" required>${emplacements.map((e) => `<option value="${esc(e.id)}">${esc(e.libelle)}</option>`).join("")}</select></label>
-              <label>Quantité posée<input name="quantite" type="number" min="0.01" step="0.01" value="1" required></label>
+              <label>Nature<select name="type"><option value="consommation">Matériau posé</option><option value="retour">Retour au stock</option></select></label>
+              <label>Quantité<input name="quantite" type="number" min="0.01" step="0.01" value="1" required></label>
               <button class="primary" type="submit">Déclarer</button>
             </form>
             <div id="mat-liste"></div>
@@ -999,10 +1038,10 @@
           await api.ajouterMouvementStock({
             catalogItemId: d.get("catalogItemId"),
             emplacementId: d.get("emplacementId"),
-            type: "consommation",
+            type: d.get("type"),
             // Une consommation est négative : c'est du stock qui sort.
-            quantite: -Math.abs(Number(d.get("quantite"))),
-            prixUnitaire: article ? Number(article.purchasePriceExclTax || article.unitPriceExclTax) : null,
+            quantite: (d.get("type") === 'retour' ? 1 : -1) * Math.abs(Number(d.get("quantite"))),
+            prixUnitaire: article ? Number(article.purchasePriceExclTax ?? article.unitPriceExclTax) : null,
             interventionId: intervention.id,
             creePar: state.me.id,
           });
@@ -1274,7 +1313,7 @@
   async function feuilleAvoir(facture) {
     const solde = await api.soldeFacture(facture.id);
     const sheet = el(`
-      <div class="sheet-back">
+      <div class="modal">
         <div class="sheet">
           <div class="sheet-head"><h2>Corriger par un avoir</h2><button class="x" id="close">&times;</button></div>
           <div class="sheet-body">
@@ -2988,8 +3027,8 @@
       </div>`);
     wrap.querySelector("#reessayer").addEventListener("click", () => location.reload());
     const changer = wrap.querySelector("#changer-compte");
-    if (changer) changer.addEventListener("click", () => {
-      api.setSession(null);
+    if (changer) changer.addEventListener("click", async () => {
+      await api.setSession(null);
       location.reload();
     });
     app.innerHTML = "";
@@ -3066,9 +3105,16 @@
     render();
   });
 
+  window.addEventListener("chantier-auth", () => {
+    if (api.recuperationEnCours && api.recuperationEnCours()) { renderNouveauMotDePasse(); return; }
+    if (api.estCloud && state.me && !api.getSession()) { arreterSync(); state.me = null; location.reload(); }
+  });
+
   // ---------- Demarrage ----------
   async function boot() {
     if ("serviceWorker" in navigator) {
+      let recharge = false; const etaitControle = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener("controllerchange", () => { if (etaitControle && !recharge) { recharge = true; location.reload(); } });
       navigator.serviceWorker.register("sw.js").catch(() => {});
     }
     let erreurDemarrage = null;
@@ -3078,6 +3124,7 @@
       erreurDemarrage = e;
       console.warn("init backend:", e);
     }
+    if (api.recuperationEnCours && api.recuperationEnCours()) { renderNouveauMotDePasse(); return; }
     // Retour de Stripe Checkout. REGLE 8 : on n'accorde JAMAIS l'acces sur le
     // seul retour de page ; on relit la base (le webhook signe fait foi). Le
     // webhook peut avoir un leger decalage => on attend qu'il ait ecrit.
@@ -3095,7 +3142,7 @@
           } catch (e) {}
           pendingAboMsg = (f && f.ouvert)
             ? { type: "ok", texte: "Paiement confirmé, votre abonnement est actif. Merci !" }
-            : { type: "attente", texte: "Paiement bien reçu. L'activation est en cours de validation, cela peut prendre quelques secondes. Actualisez si l'accès n'est pas encore ouvert." };
+            : { type: "attente", texte: "Confirmation du paiement en attente. Aucun accès supplémentaire n’est accordé tant que le serveur n’a pas confirmé l’activation. Actualisez dans quelques instants." };
         } else if (retour === "annule") {
           pendingAboMsg = { type: "info", texte: "Paiement annulé. Vous pouvez choisir une formule quand vous voulez." };
         }

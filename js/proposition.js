@@ -62,8 +62,11 @@
   }
 
   // Cherche une quantité explicite dans le fragment ("3 robinets", "2h").
+  function texteNumerique(texte) {
+    return String(texte || "").toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
   function quantite(fragment) {
-    const m = normaliser(fragment).match(/(\d+(?:[.,]\d+)?)\s*(h|heures?|m2|ml|m|u|unites?|pieces?)?/);
+    const m = texteNumerique(fragment).match(/(\d+(?:[.,]\d+)?)\s*(h|heures?|m2|ml|m|u|unites?|pieces?)?/);
     if (!m) return null;
     const valeur = parseFloat(m[1].replace(",", "."));
     return valeur > 0 ? valeur : null;
@@ -85,7 +88,7 @@
       }
 
       const fragments = texte
-        .split(/[.;\n]|,\s*(?:puis|et|ensuite)\s+/i)
+        .split(/(?<!\d)\.|\.(?!\d)|[;\n]|,\s*(?:puis|et|ensuite)\s+/i)
         .map((f) => f.trim())
         .filter((f) => f.length > 2);
 
@@ -227,7 +230,7 @@
     });
 
     // 2) La durée annoncée. « 4 heures », « 4h », « 4 h 30 ».
-    const mDuree = norm.match(/(\d+(?:[.,]\d+)?)\s*(?:h|heures?)\b/);
+    const mDuree = texteNumerique(texte).match(/(\d+(?:[.,]\d+)?)\s*(?:h|heures?)\b/);
     if (mDuree) {
       champs.push({
         position: 2, cle: "heures", libelle: "Durée annoncée",
@@ -244,7 +247,7 @@
     // pas sur les virgules. « Pose d'une robinetterie, 3 unités » doit
     // rester d'un bloc, sinon la quantité se perd.
     const phrases = texte
-      .split(/[.;\n]|,\s*(?:puis|et|ensuite)\s+/i)
+      .split(/(?<!\d)\.|\.(?!\d)|[;\n]|,\s*(?:puis|et|ensuite)\s+/i)
       .map((p) => p.trim())
       .filter((p) => p.length > 2);
     let position = 3;

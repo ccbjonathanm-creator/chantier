@@ -17,7 +17,10 @@
   // --- Configuration du projet (cle PUBLIABLE, protegee par la RLS) ---
   const SUPABASE_URL = "https://sksyieafxqhlrhmcyafo.supabase.co";
   const SUPABASE_KEY = "sb_publishable__baMXDrXoknsGAmgi5_NCQ_ZdrD0gF5";
+  const AUTH_STORAGE_KEY = "sb-sksyieafxqhlrhmcyafo-auth-token";
 
+  let recuperation = typeof location !== "undefined" && /(?:type=recovery|recuperation=1)/.test((location.hash || "") + (location.search || ""));
+  let etatSync = "connexion";
   let sb = null;          // client supabase
   let me = null;          // profil connecte, format UI {id, nom, role, couleur}
   let entrepriseId = null;
@@ -52,7 +55,7 @@
   function client() {
     if (!sb) {
       sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { persistSession: true, autoRefreshToken: true },
+        auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_STORAGE_KEY },
       });
       // F4/temps reel : Realtime evalue la RLS au role de la connexion WebSocket.
       // Sans le JWT authentifie, ce role est "anon" et ne voit AUCUNE ligne de
@@ -60,8 +63,19 @@
       // un refresh manuel). On propage donc le token a Realtime des qu'il change
       // (connexion, refresh auto, deconnexion).
       sb.auth.onAuthStateChange((_event, session) => {
+        if (_event === "PASSWORD_RECOVERY") {
+          recuperation = true;
+          // Une mise à jour du service worker peut recharger la page après
+          // consommation du fragment d'authentification par le SDK.
+          if (typeof history !== "undefined" && typeof location !== "undefined") {
+            const retour = new URL(location.href); retour.searchParams.set("recuperation", "1");
+            history.replaceState(null, "", retour.pathname + retour.search + retour.hash);
+          }
+        }
+        if (_event === "SIGNED_OUT") { me = null; entrepriseId = null; entreprise = null; employesCache = null; modulesCache = []; factCache = null; }
+        if (typeof window.dispatchEvent === "function") setTimeout(() => window.dispatchEvent(new Event("chantier-auth")), 0);
         try {
-          sb.realtime.setAuth(session ? session.access_token : SUPABASE_KEY);
+          Promise.resolve(sb.realtime.setAuth(session ? session.access_token : SUPABASE_KEY)).catch(() => {});
         } catch (e) {}
       });
     }
@@ -425,6 +439,9 @@
   // le corriger la-bas ne suffit pas, il faut le passer ici.
   function urlRetour() {
     try {
+      // Adresse de confirmation déjà autorisée dans Supabase. Elle redirige
+      // vers le nouvel hébergement en conservant le fragment de récupération.
+      if (location.hostname === "clicchantier.contactweb71.workers.dev") return "https://ccbjonathanm-creator.github.io/chantier/";
       return location.origin + location.pathname.replace(/[^/]*$/, "");
     } catch (_) {
       return undefined; // repli : Supabase utilisera son Site URL
@@ -473,6 +490,35 @@
 
     // --- Authentification (utilisee par le vrai ecran de connexion) ---
     estCloud: true,
+    recuperationEnCours() { return recuperation; },
+    async demanderRecuperation(email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim())) throw new Error("Indiquez une adresse e-mail valide.");
+      const { error } = await client().auth.resetPasswordForEmail(email.trim(), { redirectTo: urlRetour() });
+      boom(error, "Envoi impossible. Réessayez dans quelques instants.");
+      return true;
+    },
+    async definirMotDePasse(password) {
+      if (!recuperation) throw new Error("Ouvrez d’abord le lien de récupération reçu par e-mail.");
+      if (typeof password !== "string" || password.length < 12) throw new Error("Choisissez au moins 12 caractères.");
+      const { error } = await client().auth.updateUser({ password });
+      boom(error, "Lien expiré ou mot de passe refusé. Demandez un nouveau lien.");
+      recuperation = false;
+      await this.setSession(null);
+      return true;
+    },
+    etatSynchronisation() { return etatSync; },
+    async listPackDonnees(pack, collection) {
+      const { data, error } = await client().from("pack_donnees").select("donnees").eq("entreprise_id", entrepriseId).eq("pack", pack).eq("collection", collection).order("id");
+      boom(error); return (data || []).map(r => r.donnees);
+    },
+    async savePackDonnee(pack, collection, donnees) {
+      const { data, error } = await client().from("pack_donnees").upsert({ entreprise_id: entrepriseId, pack, collection, id: donnees.id, donnees }, { onConflict: "entreprise_id,pack,collection,id" }).select("donnees").single();
+      boom(error); return data.donnees;
+    },
+    async deletePackDonnee(pack, collection, id) {
+      const { error } = await client().from("pack_donnees").delete().eq("entreprise_id", entrepriseId).eq("pack", pack).eq("collection", collection).eq("id", id);
+      boom(error); return true;
+    },
     async signIn(email, password) {
       const c = client();
       const { error } = await c.auth.signInWithPassword({ email: (email || "").trim(), password });
@@ -580,11 +626,16 @@
 
     // --- Session ---
     getSession() { return me; },              // synchrone, lit le cache charge par init()
-    setSession(v) {
+    async setSession(v) {
       if (!v) {
-        const c = client();
-        c.auth.signOut().catch(() => {});
         me = null; entrepriseId = null; entreprise = null; employesCache = null; modulesCache = []; factCache = null;
+        oublierInscription();
+        if (window.Chantier.securiteSession) await window.Chantier.securiteSession.purgerCaches();
+        try { await client().auth.signOut({ scope: "local" }); }
+        finally {
+          // La déconnexion de cet appareil doit aussi fonctionner hors ligne.
+          [AUTH_STORAGE_KEY, AUTH_STORAGE_KEY + "-code-verifier", AUTH_STORAGE_KEY + "-user"].forEach((k) => localStorage.removeItem(k));
+        }
       }
     },
 
@@ -831,46 +882,9 @@
       });
     },
     async creerFactureDepuisDevis(devisId) {
-      const devis = await this.getDevis(devisId);
-      if (!devis) throw new Error("Devis introuvable");
-      if (devis.statut !== "accepte") throw new Error("Seul un devis accepté peut devenir une facture");
-      const { data: cli, error: eCli } = await client().from("clients")
-        .select("*").eq("id", devis.clientId).maybeSingle();
-      boom(eCli);
-      if (!cli) throw new Error("Client introuvable");
-      const params = await this.getParametresFacturation();
-      if (!params) throw new Error("Renseignez d'abord les paramètres de facturation");
-
-      const { data: creee, error } = await client().from("factures").insert({
-        entreprise_id: entrepriseId,
-        client_id: devis.clientId,
-        devis_id: devisId,
-        genre: "facture",
-        statut: "brouillon",
-        client_snapshot: {
-          nom: cli.display_name, kind: cli.kind, adresse: cli.billing_address_line1,
-          codePostal: cli.billing_postal_code, ville: cli.billing_city,
-        },
-        vendeur_snapshot: params.vendeurSnapshot,
-        conditions_paiement: params.conditionsPaiement,
-        penalites_retard: params.penalitesRetard,
-        indemnite_recouvrement: cli.kind === "company" ? 40 : null,
-        mention_tva: params.mentionTva,
-      }).select().single();
+      const { data, error } = await client().rpc("creer_facture_transaction", { p_devis_id: devisId });
       boom(error);
-
-      const lignes = devis.lignes.map((l, i) => ({
-        entreprise_id: entrepriseId, facture_id: creee.id, catalog_item_id: l.catalogItemId,
-        position: i + 1, libelle_snapshot: l.libelleSnapshot,
-        description_snapshot: l.descriptionSnapshot, unite_snapshot: l.uniteSnapshot,
-        quantite: l.quantite, prix_unitaire_ht: l.prixUnitaireHT, taux_tva: l.tauxTVA,
-      }));
-      if (lignes.length) {
-        const { error: eL } = await client().from("facture_lignes").insert(lignes);
-        boom(eL);
-      }
-      await recalculerTotauxFacture(creee.id);
-      return mapFacture(creee);
+      return this.getFacture((Array.isArray(data) ? data[0] : data).id);
     },
     async addFactureLigne(factureId, ligne) {
       const { data: existantes, error: eList } = await client().from("facture_lignes")
@@ -1167,14 +1181,15 @@
       if (!ids.length) return { devisId, heuresReelles: 0, materiaux: [], nbInterventions: 0 };
       const [{ data: pointages, error: ePts }, { data: mouvements, error: eMvt }] = await Promise.all([
         client().from("pointages").select("debut,fin").in("intervention_id", ids).not("fin", "is", null),
-        client().from("stock_mouvements").select("catalog_item_id,quantite,prix_unitaire,type")
-          .in("intervention_id", ids).in("type", ["consommation", "retour"]),
+        client().from("stock_mouvements").select("id,catalog_item_id,quantite,prix_unitaire,type,compense_id")
+          .in("intervention_id", ids),
       ]);
       boom(ePts); boom(eMvt);
       const heures = (pointages || []).reduce((s, p) =>
         s + (new Date(p.fin).getTime() - new Date(p.debut).getTime()) / 3600000, 0);
       const parArticle = {};
       (mouvements || []).forEach((m) => {
+        if (!["consommation", "retour"].includes(m.type) && !(m.compense_id && mouvements.some(o => o.id === m.compense_id && ["consommation", "retour"].includes(o.type)))) return;
         const net = -Number(m.quantite);
         const cle = m.catalog_item_id;
         if (!parArticle[cle]) parArticle[cle] = { catalogItemId: cle, quantite: 0, cout: 0, prixUnitaire: 0 };
@@ -1213,6 +1228,15 @@
           tauxTVA: article ? Number(article.vatRate) : 10,
         });
       });
+      const idsConsommes = new Set(reel.materiaux.map(m => m.catalogItemId));
+      const prevusNonPoses = [];
+      (devis.lignes || []).forEach(l => {
+        if (/^(h|hh|heure|heures)$/i.test(String(l.uniteSnapshot || "").trim())) return;
+        if (l.catalogItemId && idsConsommes.has(l.catalogItemId)) return;
+        const article = articles.find(a => a.id === l.catalogItemId);
+        if (article && ["product", "material"].includes(article.kind)) { prevusNonPoses.push(article.label || l.libelleSnapshot); return; }
+        lignes.push({ origine: "forfait_devis", catalogItemId: l.catalogItemId || null, libelle: l.libelleSnapshot, unite: l.uniteSnapshot, quantite: l.quantite, prixUnitaireHT: l.prixUnitaireHT, tauxTVA: l.tauxTVA, aConfirmer: true });
+      });
       let ht = 0; let tva = 0;
       lignes.forEach((l) => {
         const ligneHT = arrondir(l.quantite * l.prixUnitaireHT);
@@ -1220,7 +1244,7 @@
       });
       const totalReel = { ht: arrondir(ht), tva: arrondir(tva), ttc: arrondir(ht + tva) };
       const totalDevis = { ht: devis.totalHT, tva: devis.totalTVA, ttc: devis.totalTTC };
-      const ecarts = [];
+      const ecarts = prevusNonPoses.map(nom => ({ type: "non_pose", libelle: "« " + nom + " » était au devis mais n’est jamais sorti du stock : non facturé", montant: 0 }));
       const ecartHT = arrondir(totalReel.ht - totalDevis.ht);
       if (ecartHT !== 0) ecarts.push({
         type: ecartHT > 0 ? "depassement" : "economie",
@@ -1248,42 +1272,13 @@
       };
     },
     async creerFactureDepuisReel(devisId, lignesValidees) {
-      const devis = await this.getDevis(devisId);
-      if (!devis) throw new Error("Devis introuvable");
-      if (devis.statut !== "accepte") throw new Error("Seul un devis accepté peut être facturé");
       if (!Array.isArray(lignesValidees) || !lignesValidees.length) throw new Error("Aucune ligne validée : rien à facturer");
-      const { data: existante, error: eExiste } = await client().from("factures").select("id")
-        .eq("devis_id", devisId).neq("genre", "avoir").neq("statut", "annulee").limit(1);
-      boom(eExiste);
-      if (existante && existante.length) throw new Error("Une facture existe déjà pour ce devis");
-      const [{ data: cli, error: eCli }, params] = await Promise.all([
-        client().from("clients").select("*").eq("id", devis.clientId).maybeSingle(),
-        this.getParametresFacturation(),
-      ]);
-      boom(eCli);
-      if (!cli) throw new Error("Client introuvable");
-      const { data: facture, error: eFact } = await client().from("factures").insert({
-        entreprise_id: entrepriseId, client_id: devis.clientId, devis_id: devisId,
-        genre: "facture", origine: "reel", statut: "brouillon",
-        client_snapshot: { nom: cli.display_name, kind: cli.kind, adresse: cli.billing_address_line1, codePostal: cli.billing_postal_code, ville: cli.billing_city },
-        vendeur_snapshot: params.vendeurSnapshot, conditions_paiement: params.conditionsPaiement,
-        penalites_retard: params.penalitesRetard,
-        indemnite_recouvrement: cli.kind === "company" ? 40 : null, mention_tva: params.mentionTva,
-      }).select().single();
-      boom(eFact);
-      const rows = lignesValidees.map((l, i) => ({
-        entreprise_id: entrepriseId, facture_id: facture.id, catalog_item_id: l.catalogItemId || null,
-        position: i + 1, libelle_snapshot: l.libelle, description_snapshot: l.description || "",
-        unite_snapshot: l.unite || "u", quantite: Number(l.quantite),
-        prix_unitaire_ht: Number(l.prixUnitaireHT), taux_tva: Number(l.tauxTVA),
-      }));
-      const { error: eLignes } = await client().from("facture_lignes").insert(rows);
-      boom(eLignes);
-      await recalculerTotauxFacture(facture.id);
-      return this.getFacture(facture.id);
+      const { data, error } = await client().rpc("creer_facture_transaction", { p_devis_id: devisId, p_lignes: lignesValidees });
+      boom(error);
+      return this.getFacture((Array.isArray(data) ? data[0] : data).id);
     },
 
-    // --- Factures fournisseurs et justificatifs privés (PALIER 7) ---
+    // --- Factures fournisseurs et justificatifs privés ---
     async importerFactureFournisseur(fichier) {
       const types = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
       const nom = String(fichier.nom || "").trim();
@@ -1514,16 +1509,9 @@
       return mapPointage(ligne);
     },
     async terminerPointage(pointageId) {
-      const c = client();
-      const now = new Date().toISOString();
-      const { data: p, error } = await c.from("pointages").update({ fin: now }).eq("id", pointageId).select().single();
+      const { data, error } = await client().rpc("terminer_pointage", { p_pointage_id: pointageId });
       boom(error, "Pointage introuvable");
-      const it = await this.getIntervention(p.intervention_id);
-      if (it) {
-        const long = (it.dateFin || it.date) > it.date;
-        await c.from("interventions").update({ statut: long ? "en_cours" : "termine" }).eq("id", it.id);
-      }
-      return mapPointage(p);
+      return mapPointage(Array.isArray(data) ? data[0] : data);
     },
     async listPointages(filtre) {
       filtre = filtre || {};
@@ -1552,32 +1540,22 @@
     // entreprises). Une suppression est donc simplement reflechie au prochain
     // rafraichissement (F4, option A). Voir scratch/audit_clicchantier_f4_realtime.md.
     subscribeChanges(cb) {
-      const c = client();
-      let ch = null;
-      // On garantit que Realtime a bien le JWT authentifie AVANT de s'abonner,
-      // sinon la RLS filtre tous les evenements (voir client()).
+      const c = client(), tenant = entrepriseId;
+      let ch = null, ferme = false;
+      // Les suppressions ne sont pas diffusées par postgres_changes (RLS).
+      // Un contrôle périodique couvre aussi celles-ci et une coupure WebSocket.
+      const timer = setInterval(() => { if (!ferme && me && tenant === entrepriseId) cb({ eventType: "REFRESH" }); }, 15000);
       (async () => {
-        try {
-          const { data } = await c.auth.getSession();
-          const token = data && data.session && data.session.access_token;
-          if (token) c.realtime.setAuth(token);
-        } catch (e) {}
-        ch = c.channel("chantier-sync-" + (entrepriseId || "x"))
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "interventions" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "interventions" }, cb)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "pointages" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "pointages" }, cb)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "journal" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "journal" }, cb)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "clients" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "clients" }, cb)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "catalog_categories" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "catalog_categories" }, cb)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "catalog_items" }, cb)
-          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "catalog_items" }, cb)
-          .subscribe();
-      })();
-      return { unsubscribe() { try { if (ch) c.removeChannel(ch); } catch (e) {} } };
+        const { data } = await c.auth.getSession();
+        if (ferme || !data.session || tenant !== entrepriseId) return;
+        await c.realtime.setAuth(data.session.access_token);
+        ch = c.channel("entreprise-" + tenant);
+        for (const table of ["interventions", "pointages", "journal", "clients", "catalog_categories", "catalog_items", "pack_donnees"]) {
+          for (const event of ["INSERT", "UPDATE"]) ch.on("postgres_changes", { event, schema: "public", table, filter: "entreprise_id=eq." + tenant }, e => { if (!ferme && tenant === entrepriseId) cb(e); });
+        }
+        ch.subscribe(status => { if (ferme) return; etatSync = status === "SUBSCRIBED" ? "connecte" : "secours"; });
+      })().catch(() => { etatSync = "secours"; });
+      return { unsubscribe() { ferme = true; clearInterval(timer); if (ch) c.removeChannel(ch).catch(() => {}); } };
     },
   };
 

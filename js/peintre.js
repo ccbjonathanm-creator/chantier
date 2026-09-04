@@ -80,46 +80,7 @@
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   };
 
-  // ---------- Stockage (async, pret pour le cloud) ----------
-  // Infos entreprise : MEME cle que plombier.js / electricien.js (infos partagees).
-  const K_INFOS = "chantier_docs_infos_v1";
-  // Catalogue propre au peintre (cle distincte).
-  const K_CATALOGUE = "chantier_catalogue_peintre_v1";
-
-  function lire(cle, repli) {
-    try { const r = localStorage.getItem(cle); return r ? JSON.parse(r) : repli; } catch (e) { return repli; }
-  }
-  function ecrire(cle, val) {
-    try { localStorage.setItem(cle, JSON.stringify(val)); } catch (e) {}
-  }
-
-  const store = {
-    async infos() {
-      let i = lire(K_INFOS, null);
-      if (i === null) { i = { ...INFOS_DEFAUT }; ecrire(K_INFOS, i); }
-      return i;
-    },
-    async setInfos(data) { ecrire(K_INFOS, data); return data; },
-
-    async catalogue() {
-      let list = lire(K_CATALOGUE, null);
-      if (list === null) { list = CATALOGUE_DEFAUT.map((p) => ({ ...p, id: uid() })); ecrire(K_CATALOGUE, list); }
-      return list;
-    },
-    async savePresta(p) {
-      const list = await this.catalogue();
-      if (p.id) {
-        const i = list.findIndex((x) => x.id === p.id);
-        if (i >= 0) list[i] = p; else list.push(p);
-      } else { p.id = uid(); list.push(p); }
-      ecrire(K_CATALOGUE, list);
-      return p;
-    },
-    async deletePresta(id) {
-      ecrire(K_CATALOGUE, (await this.catalogue()).filter((x) => x.id !== id));
-      return true;
-    },
-  };
+  const store = window.Chantier.packStore.creer("peintre", () => INFOS_DEFAUT, () => CATALOGUE_DEFAUT);
 
   // Catalogue de prestations peintre pre-rempli (tarifs HT indicatifs, 4 poles).
   const CATALOGUE_DEFAUT = [
@@ -160,6 +121,7 @@
 
   // ---------- Etat interne du module ----------
   const estate = { section: "accueil" };
+  function infosAction(action) { return store.infos().then(action).catch((e) => toast(e.message || "Chargement impossible. Réessayez.")); }
   function go(section) { estate.section = section; S.rerender(); }
   function repaint() { S.rerender(); }
 
@@ -701,7 +663,7 @@
       row.querySelector('[data-a="edit"]').addEventListener("click", () => formPresta(p));
       row.querySelector('[data-a="del"]').addEventListener("click", async () => {
         if (!confirm("Supprimer cette prestation du catalogue ?")) return;
-        await store.deletePresta(p.id);
+        try { await store.deletePresta(p.id); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         repaint();
       });
       box.appendChild(row);
@@ -743,7 +705,7 @@
         prixHT: parseFloat(sheet.querySelector("#p-prix").value) || 0,
       };
       if (!np.libelle) { toast("Indiquez un libelle."); return; }
-      await store.savePresta(np);
+      try { await store.savePresta(np); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
       close();
       repaint();
     });
@@ -769,7 +731,7 @@
   }
 
   function formInfos() {
-    store.infos().then((infos) => {
+    infosAction((infos) => {
       const d = infos || { raisonSociale: "", siret: "", adresse: "", tel: "", email: "", assureur: "", assurancePolice: "", tvaIntra: "" };
       const sheet = el(`
         <div class="modal">
@@ -809,7 +771,7 @@
         };
         if (infos && infos.signatureTech) nd.signatureTech = infos.signatureTech;
         if (!nd.raisonSociale) { toast("Indiquez au moins la raison sociale."); return; }
-        await store.setInfos(nd);
+        try { await store.setInfos(nd); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         close();
         repaint();
         toast("Infos entreprise enregistrées.");
@@ -828,7 +790,7 @@
     "Chantier nettoye, protections retirees",
   ];
   function formPV() {
-    store.infos().then((infos) => {
+    infosAction((infos) => {
       if (!infos || !infos.raisonSociale) { toast("Renseignez d'abord les infos de votre entreprise."); formInfos(); return; }
       const sigEnregistree = !!infos.signatureTech;
       const controlesHtml = CONTROLES_PV.map((c, i) =>
@@ -891,7 +853,7 @@
         if (!sigEnt && infos.signatureTech) sigEnt = infos.signatureTech;
         if (padEnt.dataURL() && sheet.querySelector("#sig-k-ent-save").checked) {
           infos.signatureTech = padEnt.dataURL();
-          await store.setInfos(infos);
+          try { await store.setInfos(infos); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         }
         const decVal = sheet.querySelector("#k-decision").value;
         const decisions = { sans: "Reception prononcee SANS reserve", avec: "Reception prononcee AVEC reserves", refus: "Reception refusee" };
@@ -917,7 +879,7 @@
 
   // ----- Attestation TVA taux reduit (brique commune) -----
   function formAttestationTVA() {
-    store.infos().then((infos) => {
+    infosAction((infos) => {
       if (!infos || !infos.raisonSociale) { toast("Renseignez d'abord les infos de votre entreprise."); formInfos(); return; }
       const sigEnregistree = !!infos.signatureTech;
       const sheet = el(`
@@ -974,7 +936,7 @@
         if (!sigEnt && infos.signatureTech) sigEnt = infos.signatureTech;
         if (padEnt.dataURL() && sheet.querySelector("#sig-tva-ent-save").checked) {
           infos.signatureTech = padEnt.dataURL();
-          await store.setInfos(infos);
+          try { await store.setInfos(infos); } catch (e) { toast(e.message || "Enregistrement impossible. Réessayez."); return; }
         }
         close();
         const data = {

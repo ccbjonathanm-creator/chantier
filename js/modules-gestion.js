@@ -32,8 +32,8 @@
   // navigateur. Le module fonctionne donc en cloud comme en demonstration.
   async function pageStock() {
     const api = S.api;
-    const [articles, emplacements, niveaux, mouvements] = await Promise.all([
-      api.listCatalogItems(), api.listEmplacements(), api.niveauxStock(), api.listMouvementsStock(),
+    const [articles, emplacements, niveaux, mouvements, interventions] = await Promise.all([
+      api.listCatalogItems(), api.listEmplacements(), api.niveauxStock(), api.listMouvementsStock(), api.listInterventions({}),
     ]);
     const nomArticle = (id) => (articles.find((a) => a.id === id) || {}).label || "Article supprimé";
     const nomEmpl = (id) => (emplacements.find((e) => e.id === id) || {}).libelle || "Emplacement supprimé";
@@ -66,6 +66,7 @@
               <option value="retour">Retour de chantier</option>
               <option value="correction">Correction d'inventaire</option>
             </select></label>
+            <label data-chantier-retour hidden>Chantier du retour<select name="interventionId"><option value="">Choisir un chantier</option>${interventions.map(i => `<option value="${esc(i.id)}">${esc(i.client || "Chantier")} · ${esc(i.date)}</option>`).join("")}</select></label>
             <label>Quantité<input name="quantite" type="number" step="0.01" value="1" required></label>
             <label>Prix unitaire €<input name="prixUnitaire" type="number" min="0" step="0.01" value="0"></label>
             <label>Motif<input name="motif" placeholder="Facultatif"></label>
@@ -153,7 +154,7 @@
         try {
           const cree = await api.createCatalogItem({
             categoryId: null,
-            kind: "product",
+            kind: "material",
             reference: "",
             label: libelle,
             description: "",
@@ -185,6 +186,11 @@
 
     const form = root.querySelector("[data-form]");
     if (form && form.elements.catalogItemId) {
+      form.elements.type.addEventListener('change', () => {
+        const retour = form.elements.type.value === 'retour';
+        form.querySelector('[data-chantier-retour]').hidden = !retour;
+        form.elements.interventionId.required = retour;
+      });
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const d = new FormData(form);
@@ -193,8 +199,9 @@
             catalogItemId: d.get("catalogItemId"),
             emplacementId: d.get("emplacementId"),
             type: d.get("type"),
+            interventionId: d.get("type") === 'retour' ? d.get("interventionId") : null,
             quantite: Number(d.get("quantite")),
-            prixUnitaire: Number(d.get("prixUnitaire")) || null,
+            prixUnitaire: Number(d.get("prixUnitaire")),
             motif: d.get("motif") || "",
             creePar: S.moiId ? S.moiId() : null,
           });
