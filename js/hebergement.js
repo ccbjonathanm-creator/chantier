@@ -17,7 +17,11 @@
       if (attente && attente.length < 2000) { const fragment = new URLSearchParams(destination.hash.slice(1)); fragment.set("reprise_inscription", attente); destination.hash = fragment.toString(); }
     } catch (_) {}
     window.ChantierCadreInterdit = true;
-    location.replace(destination.href);
+    // L'ancienne installation ne doit conserver aucune réponse privée v40.
+    // Mettre aussi à jour son worker pour les autres onglets encore ouverts.
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/chantier/sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+    const purge = typeof caches === 'undefined' ? Promise.resolve() : caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('chantier-')).map(k => caches.delete(k))));
+    purge.catch(() => {}).finally(() => location.replace(destination.href));
   } else if (location.hostname === hote) {
     const fragment = new URLSearchParams(location.hash.slice(1));
     if (fragment.has("reprise_inscription")) {
